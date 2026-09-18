@@ -43,7 +43,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          gradle assembleDebug > build.log 2>&1
+          gradle clean assembleDebug lintDebug testDebugUnitTest > build.log 2>&1
           EXIT_CODE=$?
           echo "Build exit code: $EXIT_CODE" >> build.log
           exit 0
