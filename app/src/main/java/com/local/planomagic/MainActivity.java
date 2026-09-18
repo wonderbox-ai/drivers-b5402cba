@@ -111,6 +111,14 @@ public class MainActivity extends Activity {
         updateSystemBars();
 
         boolean onboarded = settings.getBoolean(KEY_ONBOARDED, false);
+
+        // Migration douce depuis les versions précédentes : si des identifiants existent déjà,
+        // l'utilisateur a déjà configuré l'application et ne doit pas repasser par l'onboarding.
+        if (!onboarded && secrets.isConfigured()) {
+            onboarded = true;
+            settings.edit().putBoolean(KEY_ONBOARDED, true).apply();
+        }
+
         if (!onboarded) {
             unlocked = true;
             root.setVisibility(View.VISIBLE);
