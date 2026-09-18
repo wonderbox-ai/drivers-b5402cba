@@ -341,6 +341,8 @@ public class MainActivity extends Activity {
                 resetSessionToHome();
             } else if ("Effacer les identifiants".equals(t)) {
                 clearAll();
+            } else if ("À propos".equals(t)) {
+                showAbout();
             }
             return true;
         });
@@ -444,7 +446,15 @@ public class MainActivity extends Activity {
         d.show();
     }
 
-    private void showAbout() {\n        new AlertDialog.Builder(this)\n                .setTitle("À propos de l’application")\n                .setMessage("Plano Magic\\nVersion 1.2\\n\\nAccès rapide et automatisé aux applications internes.\\n\\nSignature : Younes AJBILOU")\n                .setPositiveButton("OK", null)\n                .show();\n    }\n\n    private void clearAll() {
+    private void showAbout() {
+        new AlertDialog.Builder(this)
+                .setTitle("À propos de l’application")
+                .setMessage("Plano Magic\\nVersion 1.2\\n\\nAccès rapide et automatisé aux applications internes.\\n\\nSignature : Younes AJBILOU")
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void clearAll() {
         new AlertDialog.Builder(this)
                 .setTitle("Effacer les identifiants ?")
                 .setMessage("Les identifiants stockés localement seront supprimés.")
