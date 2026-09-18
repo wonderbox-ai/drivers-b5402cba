@@ -1804,25 +1804,30 @@ public class MainActivity extends Activity {
     private void showSecurity() {
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité")
-                .setMessage("• Déverrouillage biométrique au lancement (code/PIN de secours selon Android)\n"
+                .setMessage("• Déverrouillage configurable : biométrie + PIN, PIN seul ou désactivé\n"
+                        + "• Le code PIN est dérivé par PBKDF2 et n’est pas stocké en clair\n"
                         + "• Mots de passe chiffrés localement en AES-256-GCM\n"
                         + "• Clé cryptographique conservée dans Android Keystore\n"
                         + "• Aucun mot de passe enregistré dans Chrome/Edge\n"
                         + "• Aucun mot de passe envoyé sur GitHub\n"
                         + "• Ajout de sites limité à HTTPS\n"
-                        + "• Les identifiants d’un site ne sont injectés que sur son domaine exact\n"
-                        + "• SSO/MFA détectés : aucune tentative de contournement\n\n"
-                        + "Les secrets sont brièvement déchiffrés en mémoire au moment d’une connexion. Un appareil rooté ou compromis peut réduire cette protection.")
+                        + "• Les identifiants sont injectés uniquement sur le domaine de connexion détecté\n"
+                        + "• SSO/MFA détectés : aucune tentative de contournement\n"
+                        + "• Sauvegardes exportées chiffrées par mot de passe\n\n"
+                        + "Les secrets sont brièvement déchiffrés en mémoire au moment d’une connexion. "
+                        + "Un appareil rooté ou compromis peut réduire cette protection.")
                 .setPositiveButton("OK", null)
                 .show();
     }
 
     private void showAbout() {
         new AlertDialog.Builder(this)
-                .setTitle("À propos de l’application")
-                .setMessage("Wonder Apps\nVersion 1.5\n\n"
-                        + "Analyse automatique des sites, accès rapides et stockage local chiffré.\n\n"
-                        + "Signature : Younes AJBILOU")
+                .setTitle("À propos de Wonder Apps")
+                .setMessage("Wonder Apps\nVersion 1.6\n\n"
+                        + "Auteur :\nYounes AJBILOU\n\n"
+                        + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
+                        + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
+                        + "et améliorer la productivité, la fluidité et la performance.")
                 .setPositiveButton("OK", null)
                 .show();
     }
