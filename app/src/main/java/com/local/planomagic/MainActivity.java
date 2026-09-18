@@ -313,11 +313,11 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(bg());
 
-        LinearLayout bar = new LinearLayout(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(10), dp(6), dp(8), dp(6));
-        bar.setMinimumHeight(dp(58));
-        bar.setBackgroundColor(surface());
+        topBar = new LinearLayout(this);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(10), dp(6), dp(8), dp(6));
+        topBar.setMinimumHeight(dp(58));
+        topBar.setBackgroundColor(surface());
 
         avatar = new ImageView(this);
         avatar.setImageResource(R.drawable.app_icon_photo);
@@ -353,19 +353,19 @@ public class MainActivity extends Activity {
             if (!onHome) web.reload();
         });
 
-        menuButton = topAction("⋮", 28);
-        menuButton.setContentDescription("Menu");
-        menuButton.setOnClickListener(this::showPopupMenu);
+        menuButton = topAction("⚙", 22);
+        menuButton.setContentDescription("Réglages");
+        menuButton.setOnClickListener(v -> showSettingsCenter());
 
-        bar.addView(avatar);
-        bar.addView(labels);
-        bar.addView(homeButton);
-        bar.addView(refreshButton);
-        bar.addView(menuButton);
+        topBar.addView(avatar);
+        topBar.addView(labels);
+        topBar.addView(homeButton);
+        topBar.addView(refreshButton);
+        topBar.addView(menuButton);
 
-        View sep = new View(this);
-        sep.setBackgroundColor(border());
-        sep.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
+        separator = new View(this);
+        separator.setBackgroundColor(border());
+        separator.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(1)));
 
         FrameLayout content = new FrameLayout(this);
         content.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
@@ -385,10 +385,11 @@ public class MainActivity extends Activity {
         content.addView(web);
         content.addView(homeScroll);
 
-        root.addView(bar);
-        root.addView(sep);
+        root.addView(topBar);
+        root.addView(separator);
         root.addView(content);
         setContentView(root);
+        updateSystemBars();
     }
 
     private TextView topAction(String text, int size) {
