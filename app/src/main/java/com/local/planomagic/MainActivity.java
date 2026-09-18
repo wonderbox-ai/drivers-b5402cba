@@ -326,7 +326,8 @@ public class MainActivity extends Activity {
         menu.getMenu().add("Modifier le mot de passe AD");
         menu.getMenu().add("Modifier tous les identifiants");
         menu.getMenu().add("Réinitialiser la session");
-        menu.getMenu().add("Effacer les identifiants");\n        menu.getMenu().add("À propos");
+        menu.getMenu().add("Effacer les identifiants");
+        menu.getMenu().add("À propos");
 
         menu.setOnMenuItemClickListener(item -> {
             String t = item.getTitle().toString();
