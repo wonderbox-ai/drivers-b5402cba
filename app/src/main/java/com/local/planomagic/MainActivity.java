@@ -300,6 +300,63 @@ public class MainActivity extends Activity {
         decor.setSystemUiVisibility(flags);
     }
 
+    private void startOnboarding() {
+        new AlertDialog.Builder(this)
+                .setTitle("Bienvenue dans Wonder Apps")
+                .setMessage("Wonder Apps simplifie l’accès à tes outils professionnels : connexion automatique lorsque c’est possible, "
+                        + "analyse des sites ajoutés, stockage local chiffré et réglages de sécurité.\n\n"
+                        + "Nous allons d’abord choisir comment protéger l’application, puis configurer une première application. "
+                        + "Tu pourras en ajouter d’autres ensuite.")
+                .setCancelable(false)
+                .setPositiveButton("Commencer", (d,w) ->
+                        chooseUnlockMethod(true, this::showFirstAppOnboarding))
+                .setNeutralButton("Importer une sauvegarde", (d,w) ->
+                        startImport(true))
+                .show();
+    }
+
+    private void showFirstAppOnboarding() {
+        new AlertDialog.Builder(this)
+                .setTitle("Première application")
+                .setMessage("Commençons par Plano. Cette configuration sert uniquement de première étape : "
+                        + "Wonder Apps est conçu pour accueillir d’autres sites et applications ensuite.")
+                .setCancelable(false)
+                .setPositiveButton("Configurer Plano", (d,w) ->
+                        editPlanoCredentials(true, this::finishOnboarding))
+                .show();
+    }
+
+    private void finishOnboarding() {
+        getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_ONBOARDED, true)
+                .apply();
+
+        showHome("Configuration terminée");
+
+        new AlertDialog.Builder(this)
+                .setTitle("Tout est prêt")
+                .setMessage("Wonder Apps est configuré. Veux-tu intégrer un autre site maintenant ?")
+                .setPositiveButton("Ajouter un site", (d,w) -> editSiteAddress(null))
+                .setNegativeButton("Plus tard", null)
+                .show();
+    }
+
+    private void finishImportedOnboarding() {
+        getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_ONBOARDED, true)
+                .apply();
+
+        showHome("Sauvegarde restaurée");
+
+        new AlertDialog.Builder(this)
+                .setTitle("Import terminé")
+                .setMessage("Tes sites et identifiants ont été restaurés. La méthode de déverrouillage a été configurée sur ce téléphone.")
+                .setPositiveButton("Continuer", null)
+                .show();
+    }
+
     private int bg() { return darkMode ? Color.rgb(18,18,18) : Color.rgb(250,250,250); }
     private int surface() { return darkMode ? Color.rgb(32,32,32) : Color.WHITE; }
     private int surface2() { return darkMode ? Color.rgb(43,43,43) : Color.rgb(247,247,247); }
@@ -1467,6 +1524,10 @@ public class MainActivity extends Activity {
     }
 
     private void editPlanoCredentials(boolean first) {
+        editPlanoCredentials(first, null);
+    }
+
+    private void editPlanoCredentials(boolean first, Runnable afterSave) {
         EditText bu = input("Identifiant accès 1", false);
         EditText bp = input(first ? "Mot de passe accès 1" : "Nouveau mot de passe accès 1 (vide = conserver)", true);
         EditText au = input("Login AD", false);
@@ -1477,6 +1538,9 @@ public class MainActivity extends Activity {
 
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle(first ? "Configurer Plano" : "Identifiants Plano")
+                .setMessage(first
+                        ? "Plano utilise deux étapes de connexion. Ces identifiants seront chiffrés localement sur ce téléphone."
+                        : null)
                 .setView(form(bu, bp, au, ap))
                 .setPositiveButton("Enregistrer", null)
                 .setNegativeButton(first ? null : "Annuler", null)
@@ -1502,7 +1566,12 @@ public class MainActivity extends Activity {
             if (!p2.isEmpty()) secrets.put(CredentialStore.AD_PASS, p2);
 
             d.dismiss();
-            showHome("Plano configuré");
+
+            if (afterSave != null) {
+                afterSave.run();
+            } else {
+                showHome("Plano configuré");
+            }
         }));
 
         d.show();
