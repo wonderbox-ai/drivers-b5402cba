@@ -139,8 +139,7 @@ public class MainActivity extends Activity {
                                 if (unlocked || unlockFallbackStarted) return;
 
                                 if (errorCode == BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED
-                                        || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED
-                                        || errorCode == BiometricPrompt.BIOMETRIC_ERROR_NEGATIVE_BUTTON) {
+                                        || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                         finishAndRemoveTask();
                                     }
