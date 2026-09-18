@@ -2,10 +2,12 @@ package com.local.planomagic;
 
 import android.app.*;
 import android.content.SharedPreferences;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.*;
+import android.hardware.biometrics.BiometricPrompt;
 import android.text.InputType;
 import android.view.*;
 import android.webkit.*;
@@ -20,6 +22,8 @@ public class MainActivity extends Activity {
     private static final String CUSTOM_SITES = "custom_sites_v2";
     private static final String SETTINGS = "plano_magic_settings";
     private static final String KEY_DARK = "dark_mode";
+    private static final String APP_NAME = "Wonder Apps";
+    private static final int REQ_DEVICE_UNLOCK = 4107;
 
     private final Handler timer = new Handler(Looper.getMainLooper());
 
@@ -31,6 +35,9 @@ public class MainActivity extends Activity {
     private ImageView avatar;
 
     private boolean darkMode;
+    private boolean unlocked = false;
+    private boolean unlockFallbackStarted = false;
+    private CancellationSignal biometricCancellation;
     private boolean onHome = true;
     private boolean analysisMode = false;
     private int analysisPass = 0;
@@ -48,6 +55,7 @@ public class MainActivity extends Activity {
         String username = "";
         String password = "";
         String authType = "PENDING";
+        String loginHost = "";
 
         JSONObject toJson() throws Exception {
             JSONObject o = new JSONObject();
@@ -57,6 +65,7 @@ public class MainActivity extends Activity {
             o.put("username", username);
             o.put("password", password);
             o.put("authType", authType);
+            o.put("loginHost", loginHost);
             return o;
         }
 
@@ -68,6 +77,7 @@ public class MainActivity extends Activity {
             s.username = o.optString("username", "");
             s.password = o.optString("password", "");
             s.authType = o.optString("authType", "PENDING");
+            s.loginHost = o.optString("loginHost", "");
             if (o.has("autoLogin") && "PENDING".equals(s.authType) && o.optBoolean("autoLogin", false)) {
                 s.authType = "FORM";
             }
@@ -87,10 +97,123 @@ public class MainActivity extends Activity {
         secrets = new CredentialStore(this);
         buildUi();
         configureWebView();
-        showHome("Prêt");
+        root.setVisibility(View.INVISIBLE);
+        requestUnlock();
+    }
+
+    private void requestUnlock() {
+        root.setVisibility(View.INVISIBLE);
+        unlockFallbackStarted = false;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                BiometricPrompt.Builder builder = new BiometricPrompt.Builder(this)
+                        .setTitle("Déverrouiller " + APP_NAME)
+                        .setSubtitle("Confirme ton identité pour accéder aux applications");
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    builder.setDeviceCredentialAllowed(true);
+                } else {
+                    builder.setNegativeButton(
+                            "Utiliser le code",
+                            getMainExecutor(),
+                            (dialog, which) -> launchDeviceCredential());
+                }
+
+                biometricCancellation = new CancellationSignal();
+
+                builder.build().authenticate(
+                        biometricCancellation,
+                        getMainExecutor(),
+                        new BiometricPrompt.AuthenticationCallback() {
+                            @Override
+                            public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                                super.onAuthenticationSucceeded(result);
+                                unlockApp();
+                            }
+
+                            @Override
+                            public void onAuthenticationError(int errorCode, CharSequence errString) {
+                                super.onAuthenticationError(errorCode, errString);
+
+                                if (unlocked || unlockFallbackStarted) return;
+
+                                if (errorCode == BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED
+                                        || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED
+                                        || errorCode == BiometricPrompt.BIOMETRIC_ERROR_NEGATIVE_BUTTON) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                        finishAndRemoveTask();
+                                    }
+                                    return;
+                                }
+
+                                launchDeviceCredential();
+                            }
+                        });
+                return;
+            } catch (Exception ignored) {
+                launchDeviceCredential();
+                return;
+            }
+        }
+
+        launchDeviceCredential();
+    }
+
+    private void launchDeviceCredential() {
+        if (unlocked || unlockFallbackStarted) return;
+        unlockFallbackStarted = true;
+
+        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+
+        if (km == null || !km.isDeviceSecure()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Sécurité requise")
+                    .setMessage("Configure d’abord un verrouillage d’écran sécurisé (PIN, mot de passe ou biométrie) dans Android pour utiliser " + APP_NAME + ".")
+                    .setCancelable(false)
+                    .setPositiveButton("Fermer", (d,w) -> finishAndRemoveTask())
+                    .show();
+            return;
+        }
+
+        Intent intent = km.createConfirmDeviceCredentialIntent(
+                "Déverrouiller " + APP_NAME,
+                "Confirme ton identité pour accéder aux applications");
+
+        if (intent == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Déverrouillage indisponible")
+                    .setMessage("Android n’a pas pu ouvrir l’écran de vérification de l’appareil.")
+                    .setCancelable(false)
+                    .setPositiveButton("Fermer", (d,w) -> finishAndRemoveTask())
+                    .show();
+            return;
+        }
+
+        startActivityForResult(intent, REQ_DEVICE_UNLOCK);
+    }
+
+    private void unlockApp() {
+        if (unlocked || isFinishing()) return;
+        unlocked = true;
+        root.setVisibility(View.VISIBLE);
+        showHome("Déverrouillé");
 
         if (!secrets.isConfigured()) {
             editPlanoCredentials(true);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_DEVICE_UNLOCK) {
+            if (resultCode == RESULT_OK) {
+                unlockApp();
+            } else {
+                finishAndRemoveTask();
+            }
         }
     }
 
@@ -125,7 +248,7 @@ public class MainActivity extends Activity {
         labels.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
         headerTitle = new TextView(this);
-        headerTitle.setText("Mes accès");
+        headerTitle.setText("Mes accès Wonderbox");
         headerTitle.setTextSize(18);
         headerTitle.setTextColor(primary());
 
@@ -204,7 +327,7 @@ public class MainActivity extends Activity {
         homeList.removeAllViews();
 
         TextView title = new TextView(this);
-        title.setText("Mes applications");
+        title.setText("Mes applis Wonderbox");
         title.setTextSize(26);
         title.setTextColor(primary());
         homeList.addView(title);
@@ -445,8 +568,9 @@ public class MainActivity extends Activity {
             }
 
             @Override public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler h, String host, String realm) {
-                if (analysisMode && activeSite != null && sameConfiguredHost(activeSite, host)) {
+                if (analysisMode && activeSite != null) {
                     h.cancel();
+                    activeSite.loginHost = host == null ? "" : host;
                     finishAnalysis(activeSite, "BASIC");
                     return;
                 }
@@ -509,8 +633,10 @@ public class MainActivity extends Activity {
 
     private boolean sameConfiguredHost(SiteProfile site, String host) {
         if (site == null || host == null) return false;
-        String configured = Uri.parse(site.url).getHost();
-        return configured != null && configured.equalsIgnoreCase(host);
+        String allowed = site.loginHost == null || site.loginHost.isEmpty()
+                ? Uri.parse(site.url).getHost()
+                : site.loginHost;
+        return allowed != null && allowed.equalsIgnoreCase(host);
     }
 
     private boolean commonSsoHost(String host) {
@@ -550,12 +676,14 @@ public class MainActivity extends Activity {
         String host = current == null ? null : current.getHost();
 
         if (commonSsoHost(host)) {
+            site.loginHost = "";
             finishAnalysis(site, "SSO");
             return;
         }
 
         String path = current == null ? "" : String.valueOf(current.getPath()).toLowerCase(Locale.ROOT);
         if (path.contains("saml") || path.contains("oauth") || path.contains("authorize")) {
+            site.loginHost = "";
             finishAnalysis(site, "SSO");
             return;
         }
@@ -585,10 +713,13 @@ public class MainActivity extends Activity {
                 boolean sso = o.optBoolean("sso", false);
 
                 if (otp > 0) {
+                    site.loginHost = "";
                     finishAnalysis(site, "MFA");
                 } else if (passwords > 0) {
+                    site.loginHost = host == null ? "" : host;
                     finishAnalysis(site, "FORM");
                 } else if (sso) {
+                    site.loginHost = "";
                     finishAnalysis(site, "SSO");
                 } else {
                     analysisPass++;
@@ -635,12 +766,16 @@ public class MainActivity extends Activity {
         switch (detected) {
             case "BASIC":
                 title = "HTTP Basic détecté";
-                message = "Le site demande une authentification native. Plano Magic peut la remplir automatiquement.";
+                message = "Le site demande une authentification native"
+                        + (saved.loginHost.isEmpty() ? "" : " sur " + saved.loginHost)
+                        + ". Wonder Apps peut la remplir automatiquement.";
                 credsUseful = true;
                 break;
             case "FORM":
                 title = "Formulaire détecté";
-                message = "Un formulaire identifiant / mot de passe a été détecté. La connexion automatique est compatible.";
+                message = "Un formulaire identifiant / mot de passe a été détecté"
+                        + (saved.loginHost.isEmpty() ? "" : " sur " + saved.loginHost)
+                        + ". La connexion automatique est compatible.";
                 credsUseful = true;
                 break;
             case "SSO":
@@ -790,7 +925,7 @@ public class MainActivity extends Activity {
 
         homeScroll.setVisibility(View.VISIBLE);
         web.setVisibility(View.GONE);
-        headerTitle.setText("Mes accès");
+        headerTitle.setText("Mes accès Wonderbox");
         status(msg);
         homeButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
@@ -919,6 +1054,7 @@ public class MainActivity extends Activity {
 
                 if (urlChanged) {
                     s.authType = "PENDING";
+                    s.loginHost = "";
                     s.username = "";
                     s.password = "";
                 }
@@ -1177,7 +1313,8 @@ public class MainActivity extends Activity {
     private void showSecurity() {
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité")
-                .setMessage("• Mots de passe chiffrés localement en AES-256-GCM\n"
+                .setMessage("• Déverrouillage biométrique au lancement (code/PIN de secours selon Android)\n"
+                        + "• Mots de passe chiffrés localement en AES-256-GCM\n"
                         + "• Clé cryptographique conservée dans Android Keystore\n"
                         + "• Aucun mot de passe enregistré dans Chrome/Edge\n"
                         + "• Aucun mot de passe envoyé sur GitHub\n"
@@ -1192,7 +1329,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de l’application")
-                .setMessage("Plano Magic\nVersion 1.4\n\n"
+                .setMessage("Wonder Apps\nVersion 1.5\n\n"
                         + "Analyse automatique des sites, accès rapides et stockage local chiffré.\n\n"
                         + "Signature : Younes AJBILOU")
                 .setPositiveButton("OK", null)
@@ -1250,6 +1387,9 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         timer.removeCallbacksAndMessages(null);
+        if (biometricCancellation != null) {
+            try { biometricCancellation.cancel(); } catch (Exception ignored) {}
+        }
 
         if (web != null) {
             web.stopLoading();
