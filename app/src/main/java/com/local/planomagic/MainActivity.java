@@ -574,7 +574,7 @@ public class MainActivity extends Activity {
 
             try {
                 String decoded = result;
-                if (decoded != null && decoded.length() >= 2 && decoded.startsWith("\\\"") && decoded.endsWith("\\\"")) {
+                if (decoded != null && decoded.length() >= 2 && decoded.startsWith("\"") && decoded.endsWith("\"")) {
                     decoded = new JSONArray("[" + decoded + "]").getString(0);
                 }
 
