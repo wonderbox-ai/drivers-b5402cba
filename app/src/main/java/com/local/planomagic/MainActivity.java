@@ -3,6 +3,7 @@ package com.local.planomagic;
 import android.app.*;
 import android.content.SharedPreferences;
 import android.content.Intent;
+import android.provider.Settings;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -15,6 +16,8 @@ import android.widget.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 
 public class MainActivity extends Activity {
     private static final String PLANO_HOST = "plano.wonderbox.com";
@@ -23,20 +26,27 @@ public class MainActivity extends Activity {
     private static final String SETTINGS = "plano_magic_settings";
     private static final String KEY_DARK = "dark_mode";
     private static final String APP_NAME = "Wonder Apps";
-    private static final int REQ_DEVICE_UNLOCK = 4107;
+    private static final String KEY_ONBOARDED = "onboarding_complete";
+    private static final int REQ_EXPORT_BACKUP = 5101;
+    private static final int REQ_IMPORT_BACKUP = 5102;
 
     private final Handler timer = new Handler(Looper.getMainLooper());
 
     private CredentialStore secrets;
+    private PinManager pinManager;
     private WebView web;
-    private LinearLayout root, homeList;
+    private LinearLayout root, homeList, topBar;
     private ScrollView homeScroll;
     private TextView headerTitle, status, homeButton, refreshButton, menuButton;
     private ImageView avatar;
+    private View separator;
 
     private boolean darkMode;
     private boolean unlocked = false;
     private boolean unlockFallbackStarted = false;
+    private int pinAttempts = 0;
+    private String pendingBackupPassword;
+    private boolean importFromOnboarding = false;
     private CancellationSignal biometricCancellation;
     private boolean onHome = true;
     private boolean analysisMode = false;
@@ -95,125 +105,199 @@ public class MainActivity extends Activity {
                 : android.R.style.Theme_Material_Light_NoActionBar);
 
         secrets = new CredentialStore(this);
+        pinManager = new PinManager(this);
+
         buildUi();
         configureWebView();
-        root.setVisibility(View.INVISIBLE);
-        requestUnlock();
+        updateSystemBars();
+
+        boolean onboarded = settings.getBoolean(KEY_ONBOARDED, false);
+        if (!onboarded) {
+            unlocked = true;
+            root.setVisibility(View.VISIBLE);
+            showHome("Bienvenue");
+            timer.postDelayed(this::startOnboarding, 250);
+        } else {
+            root.setVisibility(View.INVISIBLE);
+            requestUnlock();
+        }
     }
 
     private void requestUnlock() {
+        String mode = pinManager.getMode();
+
+        if (PinManager.MODE_DISABLED.equals(mode)) {
+            unlockApp();
+            return;
+        }
+
+        if (PinManager.MODE_PIN.equals(mode) || Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            showPinUnlockDialog();
+            return;
+        }
+
+        if (!pinManager.hasPin()) {
+            showPinSetup(() -> requestBiometricUnlock());
+            return;
+        }
+
+        requestBiometricUnlock();
+    }
+
+    private void requestBiometricUnlock() {
         root.setVisibility(View.INVISIBLE);
         unlockFallbackStarted = false;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                BiometricPrompt.Builder builder = new BiometricPrompt.Builder(this)
-                        .setTitle("Déverrouiller " + APP_NAME)
-                        .setSubtitle("Confirme ton identité pour accéder aux applications");
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    builder.setDeviceCredentialAllowed(true);
-                } else {
-                    builder.setNegativeButton(
-                            "Utiliser le code",
-                            getMainExecutor(),
-                            (dialog, which) -> launchDeviceCredential());
-                }
-
-                biometricCancellation = new CancellationSignal();
-
-                builder.build().authenticate(
-                        biometricCancellation,
-                        getMainExecutor(),
-                        new BiometricPrompt.AuthenticationCallback() {
-                            @Override
-                            public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
-                                super.onAuthenticationSucceeded(result);
-                                unlockApp();
-                            }
-
-                            @Override
-                            public void onAuthenticationError(int errorCode, CharSequence errString) {
-                                super.onAuthenticationError(errorCode, errString);
-
-                                if (unlocked || unlockFallbackStarted) return;
-
-                                if (errorCode == BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED
-                                        || errorCode == BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                        finishAndRemoveTask();
-                                    }
-                                    return;
-                                }
-
-                                launchDeviceCredential();
-                            }
-                        });
-                return;
-            } catch (Exception ignored) {
-                launchDeviceCredential();
-                return;
-            }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            showPinUnlockDialog();
+            return;
         }
 
-        launchDeviceCredential();
+        try {
+            BiometricPrompt.Builder builder = new BiometricPrompt.Builder(this)
+                    .setTitle("Déverrouiller " + APP_NAME)
+                    .setSubtitle("Empreinte / biométrie")
+                    .setNegativeButton(
+                            "Utiliser le code PIN",
+                            getMainExecutor(),
+                            (dialog, which) -> showPinUnlockDialog());
+
+            biometricCancellation = new CancellationSignal();
+
+            builder.build().authenticate(
+                    biometricCancellation,
+                    getMainExecutor(),
+                    new BiometricPrompt.AuthenticationCallback() {
+                        @Override
+                        public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                            super.onAuthenticationSucceeded(result);
+                            unlockApp();
+                        }
+
+                        @Override
+                        public void onAuthenticationError(int errorCode, CharSequence errString) {
+                            super.onAuthenticationError(errorCode, errString);
+                            if (!unlocked && !unlockFallbackStarted) {
+                                showPinUnlockDialog();
+                            }
+                        }
+                    });
+        } catch (Exception e) {
+            showPinUnlockDialog();
+        }
     }
 
-    private void launchDeviceCredential() {
+    private void showPinUnlockDialog() {
         if (unlocked || unlockFallbackStarted) return;
         unlockFallbackStarted = true;
 
-        KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
-
-        if (km == null || !km.isDeviceSecure()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Sécurité requise")
-                    .setMessage("Configure d’abord un verrouillage d’écran sécurisé (PIN, mot de passe ou biométrie) dans Android pour utiliser " + APP_NAME + ".")
-                    .setCancelable(false)
-                    .setPositiveButton("Fermer", (d,w) -> finishAndRemoveTask())
-                    .show();
+        if (!pinManager.hasPin()) {
+            showPinSetup(this::unlockApp);
             return;
         }
 
-        Intent intent = km.createConfirmDeviceCredentialIntent(
-                "Déverrouiller " + APP_NAME,
-                "Confirme ton identité pour accéder aux applications");
+        final EditText pin = input("Code PIN", true);
+        pin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
 
-        if (intent == null) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Déverrouillage indisponible")
-                    .setMessage("Android n’a pas pu ouvrir l’écran de vérification de l’appareil.")
-                    .setCancelable(false)
-                    .setPositiveButton("Fermer", (d,w) -> finishAndRemoveTask())
-                    .show();
-            return;
-        }
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Code PIN")
+                .setMessage("Saisis le code PIN de Wonder Apps.")
+                .setView(form(pin))
+                .setPositiveButton("Déverrouiller", null)
+                .setNegativeButton("Fermer", (d,w) -> finishAndRemoveTask())
+                .create();
 
-        startActivityForResult(intent, REQ_DEVICE_UNLOCK);
+        dialog.setCancelable(false);
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String value = pin.getText().toString();
+            if (pinManager.verifyPin(value)) {
+                pinAttempts = 0;
+                dialog.dismiss();
+                unlockApp();
+                return;
+            }
+
+            pinAttempts++;
+            pin.setText("");
+            pin.setError("Code PIN incorrect");
+
+            if (pinAttempts >= 5) {
+                dialog.dismiss();
+                Toast.makeText(this, "Trop de tentatives. Wonder Apps va se fermer.", Toast.LENGTH_LONG).show();
+                timer.postDelayed(this::finishAndRemoveTask, 700);
+            }
+        }));
+        dialog.show();
+    }
+
+    private void showPinSetup(Runnable after) {
+        final EditText pin1 = input("Nouveau code PIN (4 à 8 chiffres)", true);
+        final EditText pin2 = input("Confirmer le code PIN", true);
+        pin1.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        pin2.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Créer un code PIN")
+                .setMessage("Ce code sert de secours à la biométrie et peut aussi devenir la méthode principale de déverrouillage.")
+                .setView(form(pin1, pin2))
+                .setPositiveButton("Enregistrer", null)
+                .setNegativeButton("Annuler", null)
+                .create();
+
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String a = pin1.getText().toString();
+            String b = pin2.getText().toString();
+
+            if (!a.matches("\\d{4,8}")) {
+                pin1.setError("4 à 8 chiffres");
+                return;
+            }
+            if (!a.equals(b)) {
+                pin2.setError("Les codes ne correspondent pas");
+                return;
+            }
+
+            pinManager.setPin(a);
+            dialog.dismiss();
+            if (after != null) after.run();
+        }));
+        dialog.show();
     }
 
     private void unlockApp() {
         if (unlocked || isFinishing()) return;
         unlocked = true;
+        unlockFallbackStarted = false;
         root.setVisibility(View.VISIBLE);
         showHome("Déverrouillé");
-
-        if (!secrets.isConfigured()) {
-            editPlanoCredentials(true);
-        }
     }
 
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
+    private void updateSystemBars() {
+        Window window = getWindow();
+        int barColor = darkMode ? Color.rgb(18,18,18) : Color.WHITE;
+        window.setStatusBarColor(barColor);
+        window.setNavigationBarColor(barColor);
 
-        if (requestCode == REQ_DEVICE_UNLOCK) {
-            if (resultCode == RESULT_OK) {
-                unlockApp();
-            } else {
-                finishAndRemoveTask();
+        View decor = window.getDecorView();
+        int flags = decor.getSystemUiVisibility();
+
+        if (!darkMode) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
             }
         }
+
+        decor.setSystemUiVisibility(flags);
     }
 
     private int bg() { return darkMode ? Color.rgb(18,18,18) : Color.rgb(250,250,250); }
