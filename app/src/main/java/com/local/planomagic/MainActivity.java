@@ -1307,9 +1307,21 @@ public class MainActivity extends Activity {
                 .setItems(actions, (d, which) -> {
                     if (which == 0) editSiteAddress(site);
                     else if (which == 1) editSiteCredentials(site);
-                    else if (which == 2) analyzeSite(site);
+                    else if (which == 2) confirmReanalyzeSite(site);
                     else confirmDeleteSite(site);
                 })
+                .show();
+    }
+
+    private void confirmReanalyzeSite(SiteProfile site) {
+        new AlertDialog.Builder(this)
+                .setTitle("Ré-analyser " + site.name)
+                .setMessage("La ré-analyse permet à Wonder Apps de vérifier à nouveau comment ce site se connecte "
+                        + "(formulaire, HTTP Basic, SSO, MFA ou accès direct).\n\n"
+                        + "Utilise-la si le site a changé, si la connexion automatique ne fonctionne plus ou après une modification de sa page de connexion. "
+                        + "L’analyse elle-même n’envoie aucun mot de passe.")
+                .setPositiveButton("Ré-analyser", (d,w) -> analyzeSite(site))
+                .setNegativeButton("Annuler", null)
                 .show();
     }
 
