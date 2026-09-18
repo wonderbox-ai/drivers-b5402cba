@@ -1609,6 +1609,198 @@ public class MainActivity extends Activity {
         d.show();
     }
 
+    private void showBackupMenu() {
+        String[] items = {
+                "Exporter une sauvegarde",
+                "Importer une sauvegarde"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("Sauvegarde / restauration")
+                .setMessage("La sauvegarde contient tes sites, leurs réglages et les identifiants enregistrés. "
+                        + "Elle est chiffrée avec un mot de passe d’export que toi seul connais.\n\n"
+                        + "Le code PIN de Wonder Apps n’est jamais exporté : il devra être recréé sur un nouveau téléphone.")
+                .setItems(items, (d, which) -> {
+                    if (which == 0) startExport();
+                    else startImport(false);
+                })
+                .setNegativeButton("Retour", null)
+                .show();
+    }
+
+    private void startExport() {
+        EditText p1 = input("Mot de passe de sauvegarde", true);
+        EditText p2 = input("Confirmer le mot de passe", true);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Protéger la sauvegarde")
+                .setMessage("Choisis un mot de passe d’au moins 8 caractères. Il sera indispensable pour restaurer le fichier sur un autre téléphone.")
+                .setView(form(p1, p2))
+                .setPositiveButton("Choisir l’emplacement", null)
+                .setNegativeButton("Annuler", null)
+                .create();
+
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String a = p1.getText().toString();
+            String b = p2.getText().toString();
+
+            if (a.length() < 8) {
+                p1.setError("8 caractères minimum");
+                return;
+            }
+
+            if (!a.equals(b)) {
+                p2.setError("Les mots de passe ne correspondent pas");
+                return;
+            }
+
+            pendingBackupPassword = a;
+            dialog.dismiss();
+
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/octet-stream");
+            intent.putExtra(Intent.EXTRA_TITLE, "WonderApps-backup.wonderbackup");
+            startActivityForResult(intent, REQ_EXPORT_BACKUP);
+        }));
+        dialog.show();
+    }
+
+    private void startImport(boolean fromOnboarding) {
+        importFromOnboarding = fromOnboarding;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQ_IMPORT_BACKUP);
+    }
+
+    private JSONObject createBackupPayload() throws Exception {
+        JSONObject payload = new JSONObject();
+        payload.put("format", "wonderapps-data");
+        payload.put("version", 1);
+        payload.put("basicUser", secrets.get(CredentialStore.BASIC_USER));
+        payload.put("basicPass", secrets.get(CredentialStore.BASIC_PASS));
+        payload.put("adUser", secrets.get(CredentialStore.AD_USER));
+        payload.put("adPass", secrets.get(CredentialStore.AD_PASS));
+
+        String sites = secrets.get(CUSTOM_SITES);
+        if (sites.isEmpty()) sites = secrets.get("custom_sites_v1");
+        payload.put("sites", sites.isEmpty() ? "[]" : sites);
+        payload.put("darkMode", darkMode);
+        return payload;
+    }
+
+    private void writeBackup(Uri uri, String password) {
+        try {
+            String encrypted = BackupCrypto.encrypt(createBackupPayload().toString(), password);
+            try (OutputStream out = getContentResolver().openOutputStream(uri, "w")) {
+                if (out == null) throw new IOException("Impossible d’ouvrir le fichier");
+                out.write(encrypted.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            }
+
+            Toast.makeText(this, "Sauvegarde chiffrée créée", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Échec de la sauvegarde")
+                    .setMessage("La sauvegarde n’a pas pu être créée.")
+                    .setPositiveButton("OK", null)
+                    .show();
+        } finally {
+            pendingBackupPassword = null;
+        }
+    }
+
+    private String readAll(Uri uri) throws Exception {
+        try (InputStream in = getContentResolver().openInputStream(uri);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            if (in == null) throw new IOException("Impossible d’ouvrir le fichier");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+            return out.toString(StandardCharsets.UTF_8.name());
+        }
+    }
+
+    private void promptImportPassword(Uri uri, boolean fromOnboarding) {
+        EditText password = input("Mot de passe de la sauvegarde", true);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Déchiffrer la sauvegarde")
+                .setMessage("Saisis le mot de passe utilisé lors de l’export.")
+                .setView(form(password))
+                .setPositiveButton("Importer", null)
+                .setNegativeButton("Annuler", null)
+                .create();
+
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String value = password.getText().toString();
+            if (value.isEmpty()) {
+                password.setError("Requis");
+                return;
+            }
+
+            try {
+                String encrypted = readAll(uri);
+                String plain = BackupCrypto.decrypt(encrypted, value);
+                JSONObject payload = new JSONObject(plain);
+                restoreBackupPayload(payload);
+                dialog.dismiss();
+
+                if (fromOnboarding) {
+                    chooseUnlockMethod(true, this::finishImportedOnboarding);
+                } else {
+                    showHome("Sauvegarde restaurée");
+                    Toast.makeText(this, "Import terminé", Toast.LENGTH_LONG).show();
+                }
+            } catch (Exception e) {
+                password.setText("");
+                password.setError("Mot de passe incorrect ou fichier invalide");
+            }
+        }));
+        dialog.show();
+    }
+
+    private void restoreBackupPayload(JSONObject payload) throws Exception {
+        if (!"wonderapps-data".equals(payload.optString("format"))) {
+            throw new IllegalArgumentException("Sauvegarde incompatible");
+        }
+
+        secrets.put(CredentialStore.BASIC_USER, payload.optString("basicUser", ""));
+        secrets.put(CredentialStore.BASIC_PASS, payload.optString("basicPass", ""));
+        secrets.put(CredentialStore.AD_USER, payload.optString("adUser", ""));
+        secrets.put(CredentialStore.AD_PASS, payload.optString("adPass", ""));
+        secrets.put(CUSTOM_SITES, payload.optString("sites", "[]"));
+
+        boolean importedDark = payload.optBoolean("darkMode", false);
+        applyThemeWithoutRestart(importedDark);
+        clearWebSession();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+            pendingBackupPassword = null;
+            if (requestCode == REQ_IMPORT_BACKUP && importFromOnboarding) {
+                timer.postDelayed(this::startOnboarding, 250);
+            }
+            return;
+        }
+
+        Uri uri = data.getData();
+
+        if (requestCode == REQ_EXPORT_BACKUP) {
+            String password = pendingBackupPassword;
+            if (password != null) writeBackup(uri, password);
+        } else if (requestCode == REQ_IMPORT_BACKUP) {
+            boolean fromOnboarding = importFromOnboarding;
+            importFromOnboarding = false;
+            promptImportPassword(uri, fromOnboarding);
+        }
+    }
+
     private void showSecurity() {
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité")
