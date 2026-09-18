@@ -1024,32 +1024,142 @@ public class MainActivity extends Activity {
         refreshButton.setVisibility(View.VISIBLE);
     }
 
-    private void showPopupMenu(View anchor) {
-        PopupMenu m = new PopupMenu(this, anchor);
+    private void showSettingsCenter() {
+        String[] items = {
+                "Sécurité et déverrouillage",
+                "Mot de passe AD (session Windows)",
+                "Réinitialiser la session navigateur",
+                "Apparence",
+                "Sites",
+                "Sauvegarde / restauration",
+                "À propos"
+        };
 
-        if (!onHome) m.getMenu().add("Accueil");
-        m.getMenu().add("Ajouter un site");
-        m.getMenu().add("Modifier le mot de passe AD");
-        m.getMenu().add("Réinitialiser la session");
-        m.getMenu().add("Apparence");
-        m.getMenu().add("Sécurité");
-        m.getMenu().add("À propos");
+        new AlertDialog.Builder(this)
+                .setTitle("Réglages")
+                .setItems(items, (d, which) -> {
+                    switch (which) {
+                        case 0: showUnlockSettings(); break;
+                        case 1: showAdPasswordInfo(); break;
+                        case 2: confirmResetSession(); break;
+                        case 3: showAppearance(); break;
+                        case 4: showSitesSettings(); break;
+                        case 5: showBackupMenu(); break;
+                        default: showAbout(); break;
+                    }
+                })
+                .setNegativeButton("Fermer", null)
+                .show();
+    }
 
-        m.setOnMenuItemClickListener(item -> {
-            String t = item.getTitle().toString();
+    private void showUnlockSettings() {
+        String mode = pinManager.getMode();
+        String current = PinManager.MODE_BIOMETRIC.equals(mode)
+                ? "Biométrie + code PIN de secours"
+                : (PinManager.MODE_PIN.equals(mode) ? "Code PIN" : "Désactivé");
 
-            if ("Accueil".equals(t)) showHome("Prêt");
-            else if ("Ajouter un site".equals(t)) editSiteAddress(null);
-            else if ("Modifier le mot de passe AD".equals(t)) editAdPassword();
-            else if ("Réinitialiser la session".equals(t)) resetSessionToHome();
-            else if ("Apparence".equals(t)) showAppearance();
-            else if ("Sécurité".equals(t)) showSecurity();
-            else if ("À propos".equals(t)) showAbout();
+        String[] items = {
+                "Méthode de déverrouillage\nActuel : " + current,
+                "Modifier le code PIN",
+                "Informations de sécurité"
+        };
 
-            return true;
-        });
+        new AlertDialog.Builder(this)
+                .setTitle("Sécurité et déverrouillage")
+                .setItems(items, (d, which) -> {
+                    if (which == 0) chooseUnlockMethod(false, null);
+                    else if (which == 1) showPinSetup(() ->
+                            Toast.makeText(this, "Code PIN mis à jour", Toast.LENGTH_SHORT).show());
+                    else showSecurity();
+                })
+                .setNegativeButton("Retour", null)
+                .show();
+    }
 
-        m.show();
+    private void chooseUnlockMethod(boolean onboarding, Runnable after) {
+        String[] choices = {
+                "Biométrie + code PIN de secours",
+                "Code PIN",
+                "Désactivé"
+        };
+
+        String current = pinManager.getMode();
+        int checked = PinManager.MODE_PIN.equals(current) ? 1
+                : (PinManager.MODE_DISABLED.equals(current) ? 2 : 0);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Méthode de déverrouillage")
+                .setMessage("La biométrie utilise toujours le code PIN Wonder Apps comme solution de secours.")
+                .setSingleChoiceItems(choices, checked, null)
+                .setPositiveButton("Continuer", null)
+                .setNegativeButton(onboarding ? null : "Annuler", null)
+                .create();
+
+        dialog.setCancelable(!onboarding);
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            int selected = dialog.getListView().getCheckedItemPosition();
+
+            Runnable saveAndContinue = () -> {
+                if (selected == 0) pinManager.setMode(PinManager.MODE_BIOMETRIC);
+                else if (selected == 1) pinManager.setMode(PinManager.MODE_PIN);
+                else pinManager.setMode(PinManager.MODE_DISABLED);
+
+                dialog.dismiss();
+                if (after != null) after.run();
+            };
+
+            if (selected == 2) {
+                saveAndContinue.run();
+            } else if (!pinManager.hasPin()) {
+                showPinSetup(saveAndContinue);
+            } else {
+                saveAndContinue.run();
+            }
+        }));
+        dialog.show();
+    }
+
+    private void showAdPasswordInfo() {
+        new AlertDialog.Builder(this)
+                .setTitle("Mot de passe AD / session Windows")
+                .setMessage("À utiliser après avoir changé ton mot de passe Windows / Active Directory. "
+                        + "Wonder Apps met uniquement à jour le mot de passe mémorisé pour les connexions automatiques : "
+                        + "cela ne modifie pas ton mot de passe dans l’Active Directory.")
+                .setPositiveButton("Mettre à jour", (d,w) -> editAdPassword())
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void confirmResetSession() {
+        new AlertDialog.Builder(this)
+                .setTitle("Réinitialiser la session navigateur")
+                .setMessage("Cette action efface les cookies, le cache Web et les authentifications de session. "
+                        + "Elle peut être utile si un site reste bloqué, affiche une ancienne session ou ne se reconnecte plus correctement.\n\n"
+                        + "Tes identifiants enregistrés dans Wonder Apps ne sont pas supprimés.")
+                .setPositiveButton("Réinitialiser", (d,w) -> resetSessionToHome())
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void showSitesSettings() {
+        List<SiteProfile> sites = loadSites();
+        List<String> labels = new ArrayList<>();
+        labels.add("+ Ajouter un site");
+        labels.add("Plano • Identifiants");
+
+        for (SiteProfile site : sites) {
+            labels.add(site.name + " • " + authLabel(site.authType));
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Sites")
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    if (which == 0) editSiteAddress(null);
+                    else if (which == 1) editPlanoCredentials(false);
+                    else showSiteActions(sites.get(which - 2));
+                })
+                .setNegativeButton("Retour", null)
+                .show();
     }
 
     private void showAppearance() {
@@ -1058,6 +1168,7 @@ public class MainActivity extends Activity {
 
         AlertDialog d = new AlertDialog.Builder(this)
                 .setTitle("Apparence")
+                .setMessage("Le changement s’applique sans fermer le site actuellement ouvert.")
                 .setSingleChoiceItems(choices, checked, null)
                 .setPositiveButton("Appliquer", null)
                 .setNegativeButton("Annuler", null)
@@ -1066,18 +1177,41 @@ public class MainActivity extends Activity {
         d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             int selected = d.getListView().getCheckedItemPosition();
             boolean nextDark = selected == 1;
-
-            getSharedPreferences(SETTINGS, MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(KEY_DARK, nextDark)
-                    .apply();
-
             d.dismiss();
-
-            if (nextDark != darkMode) recreate();
+            applyThemeWithoutRestart(nextDark);
         }));
-
         d.show();
+    }
+
+    private void applyThemeWithoutRestart(boolean nextDark) {
+        darkMode = nextDark;
+        getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(KEY_DARK, nextDark)
+                .apply();
+
+        setTheme(darkMode
+                ? android.R.style.Theme_Material_NoActionBar
+                : android.R.style.Theme_Material_Light_NoActionBar);
+
+        root.setBackgroundColor(bg());
+        topBar.setBackgroundColor(surface());
+        separator.setBackgroundColor(border());
+        homeScroll.setBackgroundColor(bg());
+        headerTitle.setTextColor(primary());
+        status.setTextColor(secondary());
+
+        TextView[] actions = {homeButton, refreshButton, menuButton};
+        for (TextView action : actions) {
+            action.setTextColor(primary());
+            action.setBackground(round(surface2(), 12, Color.TRANSPARENT));
+        }
+
+        updateSystemBars();
+
+        if (onHome) {
+            rebuildHome();
+        }
     }
 
     private void editSiteAddress(SiteProfile existing) {
