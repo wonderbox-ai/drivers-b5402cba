@@ -1,4 +1,4 @@
-name: Build Plano Magic APK
+name: Build Wonder Apps APK
 
 on:
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
         if: ${{ hashFiles('app/build/outputs/apk/debug/app-debug.apk') != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: PlanoMagic-debug-apk
+          name: WonderApps-debug-apk
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app-debug.apk.sha256
@@ -72,6 +72,6 @@ jobs:
         if: ${{ hashFiles('build.log') != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: PlanoMagic-build-log
+          name: WonderApps-build-log
           path: build.log
           retention-days: 1
