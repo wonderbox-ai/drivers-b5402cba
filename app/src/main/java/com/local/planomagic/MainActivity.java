@@ -3,7 +3,6 @@ package com.local.planomagic;
 import android.app.*;
 import android.content.SharedPreferences;
 import android.content.Intent;
-import android.provider.Settings;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -236,14 +235,18 @@ public class MainActivity extends Activity {
         pin1.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         pin2.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
 
+        boolean requiredWhileLocked = !unlocked;
+
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Créer un code PIN")
                 .setMessage("Ce code sert de secours à la biométrie et peut aussi devenir la méthode principale de déverrouillage.")
                 .setView(form(pin1, pin2))
                 .setPositiveButton("Enregistrer", null)
-                .setNegativeButton("Annuler", null)
+                .setNegativeButton(requiredWhileLocked ? "Fermer" : "Annuler",
+                        requiredWhileLocked ? (d,w) -> finishAndRemoveTask() : null)
                 .create();
 
+        dialog.setCancelable(!requiredWhileLocked);
         dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String a = pin1.getText().toString();
             String b = pin2.getText().toString();
@@ -1730,7 +1733,9 @@ public class MainActivity extends Activity {
                 .setMessage("Saisis le mot de passe utilisé lors de l’export.")
                 .setView(form(password))
                 .setPositiveButton("Importer", null)
-                .setNegativeButton("Annuler", null)
+                .setNegativeButton("Annuler", (d,w) -> {
+                    if (fromOnboarding) timer.postDelayed(this::startOnboarding, 200);
+                })
                 .create();
 
         dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
@@ -1784,6 +1789,7 @@ public class MainActivity extends Activity {
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             pendingBackupPassword = null;
             if (requestCode == REQ_IMPORT_BACKUP && importFromOnboarding) {
+                importFromOnboarding = false;
                 timer.postDelayed(this::startOnboarding, 250);
             }
             return;
