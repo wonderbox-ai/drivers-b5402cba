@@ -326,7 +326,7 @@ public class MainActivity extends Activity {
         menu.getMenu().add("Modifier le mot de passe AD");
         menu.getMenu().add("Modifier tous les identifiants");
         menu.getMenu().add("Réinitialiser la session");
-        menu.getMenu().add("Effacer les identifiants");
+        menu.getMenu().add("Effacer les identifiants");\n        menu.getMenu().add("À propos");
 
         menu.setOnMenuItemClickListener(item -> {
             String t = item.getTitle().toString();
@@ -444,7 +444,7 @@ public class MainActivity extends Activity {
         d.show();
     }
 
-    private void clearAll() {
+    private void showAbout() {\n        new AlertDialog.Builder(this)\n                .setTitle("À propos de l’application")\n                .setMessage("Plano Magic\\nVersion 1.2\\n\\nAccès rapide et automatisé aux applications internes.\\n\\nSignature : Younes AJBILOU")\n                .setPositiveButton("OK", null)\n                .show();\n    }\n\n    private void clearAll() {
         new AlertDialog.Builder(this)
                 .setTitle("Effacer les identifiants ?")
                 .setMessage("Les identifiants stockés localement seront supprimés.")
