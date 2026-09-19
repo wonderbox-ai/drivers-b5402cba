@@ -87,6 +87,7 @@ public class MainActivity extends Activity {
     private SiteProfile activeSite;
 
     private boolean basicTried, adTried, failureShown, genericFormTried, genericBasicTried;
+    private boolean browserHandoffStarted = false;
 
     static class SiteProfile {
         String id = "";
@@ -96,6 +97,7 @@ public class MainActivity extends Activity {
         String password = "";
         String authType = "PENDING";
         String loginHost = "";
+        String openingMode = "AUTO";
         boolean favorite = false;
         boolean requireBiometric = false;
         boolean lockOnExit = false;
@@ -113,6 +115,7 @@ public class MainActivity extends Activity {
             o.put("password", password);
             o.put("authType", authType);
             o.put("loginHost", loginHost);
+            o.put("openingMode", openingMode);
             o.put("favorite", favorite);
             o.put("requireBiometric", requireBiometric);
             o.put("lockOnExit", lockOnExit);
@@ -132,6 +135,9 @@ public class MainActivity extends Activity {
             s.password = o.optString("password", "");
             s.authType = o.optString("authType", "PENDING");
             s.loginHost = o.optString("loginHost", "");
+            String opening = o.optString("openingMode", "AUTO");
+            s.openingMode = ("IN_APP".equals(opening) || "BROWSER".equals(opening))
+                    ? opening : "AUTO";
             s.favorite = o.optBoolean("favorite", false);
             s.requireBiometric = o.optBoolean("requireBiometric", false);
             s.lockOnExit = o.optBoolean("lockOnExit", false);
@@ -878,10 +884,7 @@ public class MainActivity extends Activity {
                 authShort(type),
                 authColor(type));
 
-        card.setOnClickListener(v -> {
-            if ("PENDING".equals(type) || "UNKNOWN".equals(type)) analyzeSite(site);
-            else openCustom(site);
-        });
+        card.setOnClickListener(v -> openCustom(site));
 
         card.setOnLongClickListener(v -> {
             showSiteActions(site);
@@ -955,23 +958,26 @@ public class MainActivity extends Activity {
     private String siteStateLabel(SiteProfile site) {
         if (site == null) return "Configuration à vérifier";
         String type = site.authType == null ? "PENDING" : site.authType;
+        if ("BROWSER".equals(site.openingMode)) return "S’ouvre dans le navigateur";
+        if ("SSO".equals(type)) return "Connexion professionnelle";
+        if ("MFA".equals(type)) return "Validation de connexion nécessaire";
         if ("PENDING".equals(type) || "UNKNOWN".equals(type)) return "Configuration à vérifier";
         if (("FORM".equals(type) || "BASIC".equals(type))
                 && (site.username.isEmpty() || site.password.isEmpty())) {
-            return "Connexion nécessaire";
+            return "Identifiants à configurer";
         }
-        if ("SSO".equals(type) || "MFA".equals(type)) return "Connexion interactive";
-        return "Prêt";
+        if ("FORM".equals(type) || "BASIC".equals(type)) return "Connexion automatique disponible";
+        return "Page accessible"; // Never equate loading a page with being authenticated.
     }
 
     private String authShort(String type) {
         switch (type) {
-            case "FORM": return "FORM";
-            case "BASIC": return "BASIC";
-            case "SSO": return "SSO";
+            case "FORM":
+            case "BASIC": return "AUTO";
+            case "SSO": return "PRO";
             case "MFA": return "MFA";
             case "NONE": return "WEB";
-            default: return "ANALYSE";
+            default: return "À VOIR";
         }
     }
 
@@ -1098,6 +1104,14 @@ public class MainActivity extends Activity {
                     return true;
                 }
 
+                if (r.isForMainFrame() && !analysisMode && mode == Mode.CUSTOM
+                        && activeSite != null && "AUTO".equals(activeSite.openingMode)
+                        && commonSsoHost(u.getHost())) {
+                    SiteProfile target = activeSite;
+                    v.post(() -> handoffSsoToBrowser(target));
+                    return true;
+                }
+
                 return false;
             }
 
@@ -1152,7 +1166,16 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                headerTitle.setText(uri.getHost() == null ? "Site" : uri.getHost());
+                if (mode == Mode.CUSTOM && activeSite != null
+                        && "AUTO".equals(activeSite.openingMode)
+                        && commonSsoHost(uri.getHost())) {
+                    handoffSsoToBrowser(activeSite);
+                    return;
+                }
+
+                headerTitle.setText(mode == Mode.CUSTOM && activeSite != null
+                        ? activeSite.name
+                        : uri.getHost() == null ? "Site" : uri.getHost());
 
                 if (mode == Mode.PLANO && PLANO_HOST.equalsIgnoreCase(uri.getHost())) {
                     tryPlanoAdLogin();
@@ -1162,9 +1185,9 @@ public class MainActivity extends Activity {
                         if (genericFormTried) checkGenericSessionState(activeSite);
                         else tryGenericLogin();
                     } else if ("BASIC".equals(type) || "NONE".equals(type)) {
-                        status("Prêt");
+                        status("Page ouverte");
                     } else if ("SSO".equals(type) || "MFA".equals(type)) {
-                        status("Connexion interactive");
+                        status("Connexion professionnelle");
                     }
                 }
             }
@@ -1320,11 +1343,14 @@ public class MainActivity extends Activity {
                 break;
             case "SSO":
                 title = "SSO détecté";
-                message = "Le site semble utiliser Microsoft, Google, Okta ou un autre SSO. L’authentification restera interactive pour éviter de contourner MFA/SSO.";
+                message = "Connexion professionnelle détectée. Wonder Apps utilisera normalement "
+                        + "le navigateur du téléphone pour faciliter le retour vers " + saved.name
+                        + ". Les contrôles Microsoft et MFA restent actifs.";
                 break;
             case "MFA":
                 title = "MFA détecté";
-                message = "Un second facteur a été détecté. L’application ouvrira le site mais ne tentera pas d’automatiser le code MFA.";
+                message = "Validation supplémentaire détectée. Wonder Apps privilégiera "
+                        + "le navigateur du téléphone. La validation MFA n’est jamais contournée.";
                 break;
             case "NONE":
                 title = "Aucune connexion détectée";
@@ -1501,40 +1527,127 @@ public class MainActivity extends Activity {
         logEvent("Ouverture", "Plano");
     }
 
-    private void openCustom(SiteProfile s) {
-        if (s == null) return;
+    private boolean isBrowserPreferred(SiteProfile site) {
+        if (site == null) return false;
+        if ("BROWSER".equals(site.openingMode)) return true;
+        if ("IN_APP".equals(site.openingMode)) return false;
+        return "SSO".equals(site.authType) || "MFA".equals(site.authType);
+    }
 
-        if ("PENDING".equals(s.authType) || "UNKNOWN".equals(s.authType)) {
-            analyzeSite(s);
+    private boolean hasInvalidProviderEntryPoint(SiteProfile site) {
+        if (site == null) return true;
+        Uri uri = Uri.parse(site.url == null ? "" : site.url);
+        return !"https".equalsIgnoreCase(uri.getScheme())
+                || uri.getHost() == null
+                || commonSsoHost(uri.getHost());
+    }
+
+    private void explainEntryPoint(SiteProfile site) {
+        new AlertDialog.Builder(this)
+                .setTitle("Adresse à corriger • " + site.name)
+                .setMessage("L’adresse enregistrée est une page de connexion Microsoft "
+                        + "ou Google, et non le site " + site.name + ". Pour conserver "
+                        + "le retour automatique après identification, enregistre l’adresse "
+                        + "du site que tu ouvres normalement dans ton navigateur. "
+                        + "Les identifiants ne sont pas modifiés.")
+                .setPositiveButton("Modifier l’adresse", (d,w) -> editSiteAddress(site))
+                .setNegativeButton("Plus tard", null)
+                .show();
+    }
+
+    private void openCustom(SiteProfile site) {
+        if (site == null) return;
+        if (hasInvalidProviderEntryPoint(site)) {
+            explainEntryPoint(site);
             return;
         }
 
-        if (s.requireBiometric) {
-            requestSiteAuthentication(s.name, () -> openCustomNow(s));
-        } else {
-            openCustomNow(s);
+        Runnable open = () -> {
+            if ("PENDING".equals(site.authType) || "UNKNOWN".equals(site.authType)) {
+                if ("BROWSER".equals(site.openingMode)) openBrowserForSite(site);
+                else analyzeSite(site);
+            } else if (isBrowserPreferred(site)) {
+                openBrowserForSite(site);
+            } else {
+                openCustomNow(site);
+            }
+        };
+
+        if (site.requireBiometric) requestSiteAuthentication(site.name, open);
+        else open.run();
+    }
+
+    private void recordSiteUse(SiteProfile site) {
+        site.lastUsed = System.currentTimeMillis();
+        List<SiteProfile> sites = loadSites();
+        SiteProfile saved = findById(sites, site.id);
+        if (saved != null) {
+            saved.lastUsed = site.lastUsed;
+            saveSites(sites);
         }
     }
 
-    private void openCustomNow(SiteProfile s) {
-        if (s == null) return;
-
-        s.lastUsed = System.currentTimeMillis();
-        List<SiteProfile> sites = loadSites();
-        SiteProfile saved = findById(sites, s.id);
-        if (saved != null) {
-            saved.lastUsed = s.lastUsed;
-            saveSites(sites);
+    private void openBrowserForSite(SiteProfile site) {
+        if (hasInvalidProviderEntryPoint(site)) {
+            explainEntryPoint(site);
+            return;
         }
 
+        Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(site.url));
+        view.addCategory(Intent.CATEGORY_BROWSABLE);
+
+        try {
+            startActivity(view);
+            recordSiteUse(site);
+            logEvent("Ouverture navigateur", site.name);
+            // Returning to Wonder Apps still requires its own unlock policy.
+            showHome("Ouvert dans le navigateur");
+        } catch (android.content.ActivityNotFoundException | SecurityException error) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Navigateur indisponible")
+                    .setMessage("Aucun navigateur compatible n’a pu ouvrir cette application. "
+                            + "Tu peux choisir « Ouvrir dans Wonder Apps » "
+                            + "dans ses paramètres.")
+                    .setPositiveButton("Paramètres du site",
+                            (d,w) -> showSiteOpeningMode(site))
+                    .setNegativeButton("Fermer", null)
+                    .show();
+        }
+    }
+
+    private void handoffSsoToBrowser(SiteProfile site) {
+        if (site == null || browserHandoffStarted || mode != Mode.CUSTOM
+                || activeSite == null || !site.id.equals(activeSite.id)
+                || analysisMode || !"AUTO".equals(site.openingMode)) return;
+
+        browserHandoffStarted = true;
+        List<SiteProfile> sites = loadSites();
+        SiteProfile saved = findById(sites, site.id);
+
+        if (saved != null) {
+            if (!"MFA".equals(saved.authType)) saved.authType = "SSO";
+            saveSites(sites);
+            site.authType = saved.authType;
+        }
+
+        web.stopLoading();
+        web.loadUrl("about:blank");
+        openBrowserForSite(site);
+    }
+
+    private void openCustomNow(SiteProfile site) {
+        if (site == null) return;
+
+        browserHandoffStarted = false;
+        recordSiteUse(site);
         clearTransientState();
         mode = Mode.CUSTOM;
-        activeSite = s;
-        applyScreenProtection(s.blockScreenshots);
-        showWeb(s.name);
+        activeSite = site;
+        applyScreenProtection(site.blockScreenshots);
+        showWeb(site.name);
         status("Ouverture…");
-        web.loadUrl(s.url);
-        logEvent("Ouverture", s.name);
+        web.loadUrl(site.url);
+        logEvent("Ouverture intégrée", site.name);
     }
 
     private void showHome(String msg) {
@@ -2402,6 +2515,19 @@ public class MainActivity extends Activity {
                 return;
             }
 
+            if (commonSsoHost(parsed.getHost())) {
+                url.setError("Saisis l’adresse du site, pas celle de Microsoft / Google");
+                new AlertDialog.Builder(this)
+                        .setTitle("Adresse de l’application")
+                        .setMessage("Enregistre l’adresse de départ de " + n
+                                + " (celle que tu ouvres habituellement), et non la page "
+                                + "de connexion Microsoft ou Google. Le navigateur "
+                                + "s’occupera ensuite des redirections sécurisées.")
+                        .setPositiveButton("Corriger", null)
+                        .show();
+                return;
+            }
+
             List<SiteProfile> sites = loadSites();
             SiteProfile s;
 
@@ -2446,7 +2572,8 @@ public class MainActivity extends Activity {
         String[] actions = {
                 "Ouvrir",
                 "Modifier le nom / l’adresse",
-                "Identifiants",
+                "Connexion et identifiants",
+                "Mode d’ouverture",
                 "Changer le logo",
                 favoriteLabel,
                 "Sécurité de cette application",
@@ -2463,17 +2590,57 @@ public class MainActivity extends Activity {
                 .setItems(actions, (d, which) -> {
                     if (which == 0) openCustom(site);
                     else if (which == 1) editSiteAddress(site);
-                    else if (which == 2) editSiteCredentials(site);
-                    else if (which == 3) showSiteLogoMenu(site.id, site.name);
-                    else if (which == 4) toggleSiteFavorite(site);
-                    else if (which == 5) showSiteSecurity(site);
-                    else if (which == 6) resetSiteSession(site.id, site.url, "BASIC".equals(site.authType));
-                    else if (which == 7) pinSiteShortcut(site.id, site.name);
-                    else if (which == 8) testSiteAccess(site.name, site.url, site.vpnRequired);
-                    else if (which == 9) confirmReanalyzeSite(site);
-                    else if (which == 10) showFeedbackDialog("Problème sur " + site.name + " :\n");
+                    else if (which == 2) {
+                        if ("SSO".equals(site.authType) || "MFA".equals(site.authType)) {
+                            showSiteOpeningMode(site);
+                        } else editSiteCredentials(site);
+                    }
+                    else if (which == 3) showSiteOpeningMode(site);
+                    else if (which == 4) showSiteLogoMenu(site.id, site.name);
+                    else if (which == 5) toggleSiteFavorite(site);
+                    else if (which == 6) showSiteSecurity(site);
+                    else if (which == 7) resetSiteSession(site.id, site.url, "BASIC".equals(site.authType));
+                    else if (which == 8) pinSiteShortcut(site.id, site.name);
+                    else if (which == 9) testSiteAccess(site.name, site.url, site.vpnRequired);
+                    else if (which == 10) confirmReanalyzeSite(site);
+                    else if (which == 11) showFeedbackDialog("Problème sur " + site.name + " :\n");
                     else confirmDeleteSite(site);
                 })
+                .show();
+    }
+
+    private void showSiteOpeningMode(SiteProfile site) {
+        List<SiteProfile> sites = loadSites();
+        SiteProfile saved = findById(sites, site.id);
+        if (saved == null) return;
+
+        String[] modes = {
+                "Automatique (recommandé)",
+                "Ouvrir dans Wonder Apps",
+                "Utiliser le navigateur du téléphone"
+        };
+        String[] values = {"AUTO", "IN_APP", "BROWSER"};
+        int initial = "IN_APP".equals(saved.openingMode) ? 1
+                : "BROWSER".equals(saved.openingMode) ? 2 : 0;
+        final int[] selection = {initial};
+
+        new AlertDialog.Builder(this)
+                .setTitle("Ouverture • " + saved.name)
+                .setMessage("Wonder Apps choisit normalement le mode de connexion. "
+                        + "Si une connexion professionnelle ne fonctionne pas, "
+                        + "tu peux modifier ce réglage uniquement pour cette application.")
+                .setSingleChoiceItems(modes, initial, (d, which) -> selection[0] = which)
+                .setPositiveButton("Enregistrer", (d,w) -> {
+                    saved.openingMode = values[selection[0]];
+                    saveSites(sites);
+                    if (activeSite != null && saved.id.equals(activeSite.id)) {
+                        activeSite.openingMode = saved.openingMode;
+                    }
+                    if (onHome) rebuildHome();
+                    Toast.makeText(this, "Ouverture configurée pour " + saved.name,
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Annuler", null)
                 .show();
     }
 
@@ -3322,7 +3489,7 @@ public class MainActivity extends Activity {
                 JSONObject payload = new JSONObject();
                 payload.put("message", message);
                 payload.put("source", "Wonder Apps Android");
-                payload.put("version", "3.3");
+                payload.put("version", "3.4");
 
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(body.length);
@@ -3414,7 +3581,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 3.3\n\n"
+                .setMessage("Wonder Apps\nVersion 3.4\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
