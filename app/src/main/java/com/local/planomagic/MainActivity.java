@@ -2915,7 +2915,7 @@ public class MainActivity extends Activity {
     }
 
     private void testSiteAccess(String name, String urlValue, boolean vpnRequired) {
-        Toast.makeText(this, "Test de l’accès en cours…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "Test de disponibilité en cours…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             HttpURLConnection connection = null;
             int code = -1;
@@ -2935,8 +2935,18 @@ public class MainActivity extends Activity {
             final int result = code;
             runOnUiThread(() -> {
                 String message;
-                if (result >= 200 && result < 500) {
-                    message = "Le site répond correctement (HTTP " + result + ").";
+                if (result >= 200 && result < 400) {
+                    message = "Le serveur répond (HTTP " + result + "). "
+                            + "Cela confirme la disponibilité du site, "
+                            + "pas ta connexion à ton compte.";
+                } else if (result == 401 || result == 403) {
+                    message = "Le serveur répond (HTTP " + result + "), "
+                            + "mais l’accès nécessite une authentification "
+                            + "ou une autorisation. Ce test ne se connecte pas à ta place.";
+                } else if (result >= 400 && result < 500) {
+                    message = "Le serveur a répondu (HTTP " + result + "). "
+                            + "Vérifie l’adresse ou les droits d’accès : "
+                            + "aucune session utilisateur n’a été testée.";
                 } else if (vpnRequired) {
                     message = "Le site ne répond pas. Vérifie que le VPN ou le réseau interne est actif.";
                 } else {
@@ -2944,7 +2954,7 @@ public class MainActivity extends Activity {
                 }
 
                 new AlertDialog.Builder(this)
-                        .setTitle("Test d’accès • " + name)
+                        .setTitle("Disponibilité • " + name)
                         .setMessage(message)
                         .setPositiveButton("OK", null)
                         .show();
