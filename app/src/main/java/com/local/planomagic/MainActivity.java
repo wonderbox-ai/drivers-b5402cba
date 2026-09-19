@@ -1647,10 +1647,6 @@ public class MainActivity extends Activity {
     private Bitmap automaticShortcutIcon(String siteId, String name) {
         Bitmap custom = loadSiteLogoBitmap(siteId);
         if (custom != null) return custom;
-        if (SITE_PLANO_ID.equals(siteId)) {
-            return BitmapFactory.decodeResource(getResources(), R.drawable.app_icon_photo);
-        }
-
         int size = 256;
         Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
@@ -1752,7 +1748,10 @@ public class MainActivity extends Activity {
     }
 
     private void loadAppLogo() {
-        if (avatar != null) avatar.setImageResource(R.drawable.app_icon_photo);
+        if (avatar == null) return;
+        avatar.setImageResource(R.drawable.ic_launcher_foreground);
+        avatar.setBackground(round(Color.rgb(8,8,8), 12, Color.TRANSPARENT));
+        avatar.setPadding(dp(3), dp(3), dp(3), dp(3));
     }
 
     private File siteLogoFile(String siteId) {
@@ -3259,7 +3258,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 2.0\n\n"
+                .setMessage("Wonder Apps\nVersion 3.0\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
