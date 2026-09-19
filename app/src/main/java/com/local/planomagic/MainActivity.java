@@ -15,6 +15,9 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import android.provider.Settings;
 import android.os.*;
 import android.hardware.biometrics.BiometricPrompt;
 import android.text.InputType;
@@ -1646,6 +1649,47 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean hasActiveVpn() {
+        try {
+            ConnectivityManager manager =
+                    (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (manager == null || manager.getActiveNetwork() == null) return false;
+            NetworkCapabilities capabilities =
+                    manager.getNetworkCapabilities(manager.getActiveNetwork());
+            return capabilities != null
+                    && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void showVpnConnectionHelp(SiteProfile site) {
+        new AlertDialog.Builder(this)
+                .setTitle("Connexion professionnelle nécessaire")
+                .setMessage(site.name + " est un site interne en HTTP. "
+                        + "Wonder Apps ne détecte pas de VPN actif pour sa connexion. "
+                        + "Active le VPN Wonderbox, puis retouche l’application. "
+                        + "Si tu es déjà sur le réseau interne de l’entreprise, "
+                        + "tu peux essayer sans VPN. Wonder Apps ne peut pas "
+                        + "activer ni authentifier ton VPN à ta place.")
+                .setPositiveButton("Réglages VPN", (d,w) -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_VPN_SETTINGS));
+                    } catch (Exception unavailable) {
+                        Toast.makeText(this, "Ouvre ton application VPN professionnelle.",
+                                Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton("Déjà sur réseau interne", (d,w) -> {
+                    if (!launchExternalSite(site, null)) {
+                        Toast.makeText(this, "Navigateur indisponible",
+                                Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
     private void openBrowserForSite(SiteProfile site) {
         if (hasInvalidProviderEntryPoint(site)) {
             explainEntryPoint(site);
@@ -1666,6 +1710,11 @@ public class MainActivity extends Activity {
                             (d,w) -> showSiteSecurity(site))
                     .setNegativeButton("Annuler", null)
                     .show();
+            return;
+        }
+
+        if (isInternalHttp(site) && !hasActiveVpn()) {
+            showVpnConnectionHelp(site);
             return;
         }
 
