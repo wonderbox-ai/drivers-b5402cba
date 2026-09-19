@@ -3,6 +3,9 @@ package com.local.planomagic;
 import android.app.*;
 import android.content.SharedPreferences;
 import android.content.Intent;
+import android.content.pm.ShortcutManager;
+import android.content.pm.ShortcutInfo;
+import android.graphics.drawable.Icon;
 import android.graphics.Color;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -424,7 +427,15 @@ public class MainActivity extends Activity {
         refreshButton = topAction("↻", 24);
         refreshButton.setContentDescription("Actualiser");
         refreshButton.setOnClickListener(v -> {
-            if (!onHome) web.reload();
+            if (!onHome) {
+                basicTried = false;
+                adTried = false;
+                failureShown = false;
+                genericFormTried = false;
+                genericBasicTried = false;
+                status("Actualisation…");
+                web.reload();
+            }
         });
 
         menuButton = topAction("⚙", 22);
@@ -816,9 +827,28 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();
+                if (u == null) return true;
 
-                if (u == null || !"https".equalsIgnoreCase(u.getScheme())) {
-                    Toast.makeText(MainActivity.this, "Navigation non sécurisée bloquée", Toast.LENGTH_SHORT).show();
+                String scheme = u.getScheme() == null ? "" : u.getScheme().toLowerCase(Locale.ROOT);
+
+                // Internal WebView schemes are not network transport and must not be treated as insecure.
+                if ("javascript".equals(scheme) || "about".equals(scheme)
+                        || "data".equals(scheme) || "blob".equals(scheme)) {
+                    return false;
+                }
+
+                // Plano contains legacy links that may still point to http:// on the same host.
+                // Upgrade safe GET navigations to HTTPS instead of blocking logout/navigation.
+                if ("http".equals(scheme) && mode == Mode.PLANO
+                        && PLANO_HOST.equalsIgnoreCase(u.getHost())
+                        && "GET".equalsIgnoreCase(r.getMethod())) {
+                    Uri secure = u.buildUpon().scheme("https").build();
+                    v.loadUrl(secure.toString());
+                    return true;
+                }
+
+                if (!"https".equals(scheme)) {
+                    Toast.makeText(MainActivity.this, "Lien externe ou non sécurisé bloqué", Toast.LENGTH_SHORT).show();
                     return true;
                 }
 
@@ -1129,23 +1159,50 @@ public class MainActivity extends Activity {
     private void checkPlanoFailure() {
         if (!adTried || failureShown || isFinishing()) return;
 
-        web.evaluateJavascript(
-                "(function(){var p=document.querySelector('input[type=password]');return !!(p&&p.offsetParent!==null);})()",
-                r -> {
-                    if ("true".equals(r)) {
-                        failureShown = true;
-                        status("Mot de passe AD à mettre à jour");
+        String js = "(function(){"
+                + "var p=document.querySelector('input[type=password]');"
+                + "var visible=!!(p&&p.offsetParent!==null);"
+                + "var txt=(document.body?document.body.innerText:'').toLowerCase();"
+                + "var explicit=(txt.indexOf('mot de passe incorrect')>=0"
+                + "||txt.indexOf('identifiant incorrect')>=0"
+                + "||txt.indexOf('invalid password')>=0"
+                + "||txt.indexOf('invalid credentials')>=0"
+                + "||txt.indexOf('authentication failed')>=0"
+                + "||txt.indexOf('connexion refusée')>=0);"
+                + "return JSON.stringify({visible:visible,explicit:explicit});"
+                + "})()";
 
-                        new AlertDialog.Builder(this)
-                                .setTitle("Connexion AD refusée")
-                                .setMessage("Ton mot de passe AD a peut-être changé.")
-                                .setPositiveButton("Mettre à jour", (d,w) -> editAdPassword())
-                                .setNegativeButton("Annuler", null)
-                                .show();
-                    } else {
-                        status("Connecté");
-                    }
-                });
+        web.evaluateJavascript(js, r -> {
+            try {
+                String decoded = r;
+                if (decoded != null && decoded.length() >= 2
+                        && decoded.startsWith("\"") && decoded.endsWith("\"")) {
+                    decoded = new JSONArray("[" + decoded + "]").getString(0);
+                }
+
+                JSONObject result = new JSONObject(decoded == null ? "{}" : decoded);
+                boolean visible = result.optBoolean("visible", false);
+                boolean explicit = result.optBoolean("explicit", false);
+
+                if (visible && explicit) {
+                    failureShown = true;
+                    status("Connexion AD refusée");
+
+                    new AlertDialog.Builder(this)
+                            .setTitle("Connexion AD refusée")
+                            .setMessage("Plano indique explicitement que l’identifiant ou le mot de passe a été refusé.")
+                            .setPositiveButton("Mettre à jour", (d,w) -> editAdPassword())
+                            .setNegativeButton("Annuler", null)
+                            .show();
+                } else if (visible) {
+                    status("Formulaire de connexion prêt");
+                } else {
+                    status("Connecté");
+                }
+            } catch (Exception ex) {
+                status("Connexion en cours…");
+            }
+        });
     }
 
     private void openPlano() {
@@ -1312,6 +1369,37 @@ public class MainActivity extends Activity {
         if (file.exists()) file.delete();
         loadAppLogo();
         Toast.makeText(this, "Logo par défaut restauré", Toast.LENGTH_SHORT).show();
+    }
+
+    private void pinCustomHomeShortcut() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Toast.makeText(this, "Cette fonction nécessite Android 8 ou plus récent.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        ShortcutManager manager = getSystemService(ShortcutManager.class);
+        if (manager == null || !manager.isRequestPinShortcutSupported()) {
+            Toast.makeText(this, "Le lanceur de ce téléphone ne permet pas les raccourcis personnalisés.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        Bitmap bitmap = null;
+        File file = customLogoFile();
+        if (file.exists()) bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+        if (bitmap == null) bitmap = BitmapFactory.decodeResource(getResources(), R.drawable.app_icon_photo);
+
+        Intent launch = new Intent(this, MainActivity.class);
+        launch.setAction(Intent.ACTION_MAIN);
+        launch.addCategory(Intent.CATEGORY_LAUNCHER);
+
+        ShortcutInfo shortcut = new ShortcutInfo.Builder(this, "wonder_apps_custom_home")
+                .setShortLabel("Wonder Apps")
+                .setLongLabel("Wonder Apps")
+                .setIcon(Icon.createWithBitmap(bitmap))
+                .setIntent(launch)
+                .build();
+
+        manager.requestPinShortcut(shortcut, null);
     }
 
     private void showSettingsCenter() {
@@ -1559,6 +1647,11 @@ public class MainActivity extends Activity {
                 "Restaurer le logo par défaut",
                 "Revenir à l’image actuellement fournie avec l’application",
                 v -> resetAppLogo()));
+        content.addView(settingsRow(
+                "Créer un raccourci avec ce logo",
+                "Ajoute sur l’écran d’accueil un raccourci Wonder Apps utilisant le logo choisi",
+                v -> pinCustomHomeShortcut()));
+        content.addView(smallNote("Android ne permet pas à une application de remplacer librement son icône système par n’importe quelle photo. Le raccourci personnalisé contourne proprement cette limite : tu peux ensuite retirer l’ancien raccourci de l’écran d’accueil."));
         content.addView(smallNote("Le changement de thème modifie l’interface de Wonder Apps sans fermer le site ouvert. Le contenu du site lui-même garde son propre thème."));
 
         AlertDialog d = new AlertDialog.Builder(this)
@@ -2305,7 +2398,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 1.9\n\n"
+                .setMessage("Wonder Apps\nVersion 2.0\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
