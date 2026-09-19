@@ -993,7 +993,7 @@ public class MainActivity extends Activity {
                 && (site.username.isEmpty() || site.password.isEmpty())) {
             return "Identifiants à configurer";
         }
-        if ("DUAL".equals(type)) return dualConfigured(site)
+        if ("BASIC_FORM".equals(type)) return dualConfigured(site)
                 ? "Connexion en 2 étapes configurée" : "Connexion en 2 étapes à configurer";
         if ("FORM".equals(type) || "BASIC".equals(type)) return "Connexion auto configurée";
         return "Page accessible"; // Never equate loading a page with being authenticated.
@@ -1003,7 +1003,7 @@ public class MainActivity extends Activity {
         switch (type) {
             case "FORM":
             case "BASIC":
-            case "DUAL": return "AUTO";
+            case "BASIC_FORM": return "AUTO";
             case "SSO": return "PRO";
             case "MFA": return "MFA";
             case "NONE": return "WEB";
@@ -1015,7 +1015,7 @@ public class MainActivity extends Activity {
         switch (type) {
             case "FORM": return "formulaire détecté";
             case "BASIC": return "HTTP Basic détecté";
-            case "DUAL": return "Deux étapes : HTTP Basic puis formulaire AD";
+            case "BASIC_FORM": return "Deux étapes : HTTP Basic puis formulaire AD";
             case "SSO": return "SSO détecté";
             case "MFA": return "MFA détecté";
             case "NONE": return "aucune connexion détectée";
@@ -1025,7 +1025,7 @@ public class MainActivity extends Activity {
     }
 
     private int authColor(String type) {
-        if ("FORM".equals(type) || "BASIC".equals(type) || "DUAL".equals(type))
+        if ("FORM".equals(type) || "BASIC".equals(type) || "BASIC_FORM".equals(type))
             return Color.rgb(45,160,90);
         if ("SSO".equals(type) || "MFA".equals(type)) return Color.rgb(220,150,35);
         if ("UNKNOWN".equals(type)) return Color.rgb(210,80,70);
@@ -1602,7 +1602,7 @@ public class MainActivity extends Activity {
     private boolean isBrowserPreferred(SiteProfile site) {
         if (site == null) return false;
         if (isInternalHttp(site)) return true; // Even when old settings claim IN_APP.
-        if ("DUAL".equals(site.authType)) return false; // Two-step login is integrated and HTTPS-only.
+        if ("BASIC_FORM".equals(site.authType)) return false; // Two-step login is integrated and HTTPS-only.
         String host = site.url == null ? null : Uri.parse(site.url).getHost();
         return SiteRoutingPolicy.useExternalBrowser(host, site.authType, site.openingMode);
     }
