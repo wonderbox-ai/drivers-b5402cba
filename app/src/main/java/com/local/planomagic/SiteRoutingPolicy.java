@@ -35,6 +35,22 @@ final class SiteRoutingPolicy {
                 || value.endsWith(".pingidentity.com");
     }
 
+    /**
+     * Narrow allowlist for the corporate VPN's internal HTTP namespace.
+     * No cleartext request is performed by Wonder Apps itself; the browser
+     * is responsible for loading the explicit URL over the user's VPN.
+     */
+    static boolean isWonderboxVpnHost(String host) {
+        if (host == null) return false;
+        String value = host.toLowerCase(Locale.ROOT);
+        return value.endsWith(".wonderbox.vpn")
+                && value.length() > ".wonderbox.vpn".length();
+    }
+
+    static boolean isAllowedInternalHttp(String scheme, String host) {
+        return "http".equalsIgnoreCase(scheme) && isWonderboxVpnHost(host);
+    }
+
     static boolean useExternalBrowser(String host, String authType, String openingMode) {
         if ("IN_APP".equals(openingMode)) return false;
         if ("BROWSER".equals(openingMode) || "EDGE".equals(openingMode)
