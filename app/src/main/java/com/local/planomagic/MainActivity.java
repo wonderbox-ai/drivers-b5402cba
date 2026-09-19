@@ -2634,7 +2634,9 @@ public class MainActivity extends Activity {
                     if (which == 0) openCustom(site);
                     else if (which == 1) editSiteAddress(site);
                     else if (which == 2) {
-                        if (isBrowserPreferred(site)) {
+                        if (isBrowserPreferred(site) && isAtlassianCloudSite(site)) {
+                            showProfessionalConnectionInfo(site);
+                        } else if (isBrowserPreferred(site)) {
                             showSiteOpeningMode(site);
                         } else editSiteCredentials(site);
                     }
@@ -2658,20 +2660,24 @@ public class MainActivity extends Activity {
         if (saved == null) return;
 
         String[] modes = {
-                "Automatique (recommandé)",
-                "Ouvrir dans Wonder Apps",
-                "Utiliser le navigateur du téléphone"
+                "Automatique • Edge si disponible pour les connexions pro",
+                "Ouvrir directement dans Wonder Apps",
+                "Microsoft Edge",
+                "Google Chrome",
+                "Samsung Internet",
+                "Navigateur par défaut du téléphone"
         };
-        String[] values = {"AUTO", "IN_APP", "BROWSER"};
-        int initial = "IN_APP".equals(saved.openingMode) ? 1
-                : "BROWSER".equals(saved.openingMode) ? 2 : 0;
+        String[] values = {"AUTO", "IN_APP", "EDGE", "CHROME", "SAMSUNG", "BROWSER"};
+        int initial = 0;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(saved.openingMode)) initial = i;
+        }
         final int[] selection = {initial};
 
+        // Android AlertDialog cannot display setMessage and setSingleChoiceItems
+        // simultaneously: setMessage previously hid every actual choice on Samsung.
         new AlertDialog.Builder(this)
-                .setTitle("Ouverture • " + saved.name)
-                .setMessage("Wonder Apps choisit normalement le mode de connexion. "
-                        + "Si une connexion professionnelle ne fonctionne pas, "
-                        + "tu peux modifier ce réglage uniquement pour cette application.")
+                .setTitle("Ouvrir " + saved.name)
                 .setSingleChoiceItems(modes, initial, (d, which) -> selection[0] = which)
                 .setPositiveButton("Enregistrer", (d,w) -> {
                     saved.openingMode = values[selection[0]];
@@ -2685,6 +2691,48 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Annuler", null)
                 .show();
+    }
+
+    private void showProfessionalConnectionInfo(SiteProfile site) {
+        boolean savedCredentials = !site.username.isEmpty() || !site.password.isEmpty();
+
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                .setTitle("Connexion professionnelle • " + site.name)
+                .setMessage("Wonder Apps ouvre le site dans un navigateur compatible. "
+                        + "Sur Atlassian, choisis « Microsoft » si c’est ta méthode "
+                        + "habituelle, ou saisis ton e-mail professionnel puis « Continuer » "
+                        + "si votre entreprise utilise la connexion unique. "
+                        + "La connexion et la MFA sont gérées par Atlassian / Microsoft : "
+                        + "ton mot de passe n’est pas transmis par Wonder Apps.")
+                .setPositiveButton("Ouvrir " + site.name,
+                        (d,w) -> openCustom(site))
+                .setNegativeButton("Fermer", null);
+
+        if (savedCredentials) {
+            dialog.setNeutralButton("Effacer anciens identifiants",
+                    (d,w) -> new AlertDialog.Builder(this)
+                            .setTitle("Effacer les identifiants de " + site.name + " ?")
+                            .setMessage("Les anciens identifiants stockés par Wonder Apps "
+                                    + "ne sont pas nécessaires à la connexion Microsoft. "
+                                    + "Cette action ne modifie pas ton compte professionnel.")
+                            .setPositiveButton("Effacer", (confirm,which) -> {
+                                List<SiteProfile> sites = loadSites();
+                                SiteProfile saved = findById(sites, site.id);
+                                if (saved == null) return;
+                                saved.username = "";
+                                saved.password = "";
+                                saveSites(sites);
+                                site.username = "";
+                                site.password = "";
+                                Toast.makeText(this, "Anciens identifiants effacés",
+                                        Toast.LENGTH_SHORT).show();
+                            })
+                            .setNegativeButton("Annuler", null)
+                            .show());
+        } else {
+            dialog.setNeutralButton("Mode d’ouverture", (d,w) -> showSiteOpeningMode(site));
+        }
+        dialog.show();
     }
 
     private void showPlanoActions() {
