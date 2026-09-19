@@ -1915,36 +1915,85 @@ public class MainActivity extends Activity {
         openCustom(site);
     }
 
-    private void clearSiteSession(String url, boolean clearHttpAuth) {
+    /**
+     * Best-effort cleanup of the current WebView origin only.
+     * CookieManager does not support reliable removal of all cookies for one
+     * origin (domain/path variants), and Android's HTTP auth store is global.
+     * Do not call the global clear methods from a per-site action.
+     */
+    private void clearSiteSession(String url, boolean httpBasic) {
         try {
-            CookieManager cm = CookieManager.getInstance();
-            String cookieHeader = cm.getCookie(url);
-            if (cookieHeader != null && !cookieHeader.isEmpty()) {
-                Uri u = Uri.parse(url);
-                String base = (u.getScheme() == null ? "https" : u.getScheme()) + "://" + u.getHost();
-                String[] cookies = cookieHeader.split(";");
-                for (String cookie : cookies) {
-                    int eq = cookie.indexOf('=');
-                    if (eq > 0) {
-                        String name = cookie.substring(0, eq).trim();
-                        cm.setCookie(base, name + "=; Max-Age=0; Path=/; Secure");
-                    }
+            Uri uri = Uri.parse(url);
+            String host = uri.getHost();
+            if (host == null || !"https".equalsIgnoreCase(uri.getScheme())) return;
+            String origin = "https://" + host
+                    + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+
+            CookieManager manager = CookieManager.getInstance();
+            String existing = manager.getCookie(url);
+            if (existing != null) {
+                for (String cookie : existing.split(";")) {
+                    int separator = cookie.indexOf('=');
+                    if (separator <= 0) continue;
+                    String name = cookie.substring(0, separator).trim();
+                    // This expires the root-scoped cookie for this host, not
+                    // cookies belonging to separate identity-provider sites.
+                    manager.setCookie(origin,
+                            name + "=; Max-Age=0; Path=/; Secure");
                 }
-                cm.flush();
+                manager.flush();
             }
-            if (clearHttpAuth) WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
-        } catch (Exception ignored) {}
+            WebStorage.getInstance().deleteOrigin(origin);
+        } catch (Exception ignored) {
+            logEvent("Nettoyage local partiel", url == null ? "" : Uri.parse(url).getHost());
+        }
     }
 
-    private void resetSiteSession(String siteId, String url, boolean clearHttpAuth) {
-        clearSiteSession(url, clearHttpAuth);
-        if (activeSite != null && siteId != null && siteId.equals(activeSite.id)) {
-            web.stopLoading();
-            web.loadUrl("about:blank");
+    private void resetSiteSession(String siteId, String url, boolean httpBasic) {
+        if (!SITE_PLANO_ID.equals(siteId)) {
+            SiteProfile saved = findById(loadSites(), siteId);
+            if (saved != null && isBrowserPreferred(saved)) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Session de " + saved.name)
+                        .setMessage("Cette application s’ouvre dans un navigateur externe. "
+                                + "Wonder Apps ne peut pas lire ni supprimer les cookies "
+                                + "et sessions d’Edge, Chrome ou Samsung Internet. "
+                                + "Pour te déconnecter, utilise le bouton du site "
+                                + "ou les paramètres du navigateur concerné.")
+                        .setPositiveButton("Compris", null)
+                        .show();
+                return;
+            }
         }
-        clearTransientState();
-        logEvent("Session réinitialisée", siteId);
-        Toast.makeText(this, "Session de cette application réinitialisée", Toast.LENGTH_SHORT).show();
+
+        new AlertDialog.Builder(this)
+                .setTitle("Nettoyage local")
+                .setMessage("Wonder Apps va nettoyer les cookies accessibles et le "
+                        + "stockage Web de ce site, sans effacer les autres sites. "
+                        + (httpBasic
+                        ? "L’authentification HTTP Basic peut rester en cache dans "
+                            + "Android : une déconnexion complète peut nécessiter "
+                            + "la réinitialisation globale de la session navigateur. "
+                        : "Les cookies d’autres chemins ou fournisseurs SSO "
+                            + "peuvent persister. ")
+                        + "Pour une déconnexion garantie, utilise la fonction "
+                        + "Déconnexion du site quand elle existe.")
+                .setPositiveButton("Nettoyer", (d,w) -> {
+                    clearSiteSession(url, httpBasic);
+                    if (activeSite != null && siteId != null && siteId.equals(activeSite.id)) {
+                        web.stopLoading();
+                        web.loadUrl("about:blank");
+                    } else if (SITE_PLANO_ID.equals(siteId) && mode == Mode.PLANO) {
+                        web.stopLoading();
+                        web.loadUrl("about:blank");
+                    }
+                    clearTransientState();
+                    logEvent("Nettoyage local", siteId);
+                    Toast.makeText(this, "Nettoyage local effectué",
+                            Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
     }
 
     private Bitmap automaticShortcutIcon(String siteId, String name) {
