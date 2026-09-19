@@ -1830,7 +1830,117 @@ public class MainActivity extends Activity {
         return false;
     }
 
+    private void clearPendingVpnSite() {
+        waitingVpnSiteId = null;
+        waitingVpnStartedAt = 0L;
+        getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
+                .remove(KEY_PENDING_VPN_SITE)
+                .remove(KEY_PENDING_VPN_STARTED)
+                .apply();
+        NotificationManager manager =
+                (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) manager.cancel(NOTIFICATION_VPN_RETURN);
+    }
+
+    private void rememberPendingVpnSite(SiteProfile site) {
+        if (site == null || !site.resumeAfterVpn) {
+            clearPendingVpnSite();
+            return;
+        }
+        waitingVpnSiteId = site.id;
+        waitingVpnStartedAt = System.currentTimeMillis();
+        getSharedPreferences(SETTINGS, MODE_PRIVATE).edit()
+                .putString(KEY_PENDING_VPN_SITE, waitingVpnSiteId)
+                .putLong(KEY_PENDING_VPN_STARTED, waitingVpnStartedAt)
+                .apply();
+    }
+
+    private void showVpnReturnNotification(SiteProfile site) {
+        if (site == null || waitingVpnSiteId == null) return;
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) return;
+
+        try {
+            NotificationManager manager =
+                    (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (manager == null) return;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                        VPN_RETURN_CHANNEL, "Revenir aux applications après VPN",
+                        NotificationManager.IMPORTANCE_LOW);
+                channel.setDescription("Rappel demandé lors de l’ouverture de FortiClient VPN");
+                manager.createNotificationChannel(channel);
+            }
+            Intent back = new Intent(this, MainActivity.class);
+            back.setAction(ACTION_RETURN_VPN);
+            back.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent tap = PendingIntent.getActivity(
+                    this, NOTIFICATION_VPN_RETURN, back,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+            Notification.Builder builder = Build.VERSION.SDK_INT
+                    >= Build.VERSION_CODES.O
+                    ? new Notification.Builder(this, VPN_RETURN_CHANNEL)
+                    : new Notification.Builder(this);
+            Notification note = builder.setSmallIcon(R.mipmap.ic_launcher)
+                    .setContentTitle("Revenir à " + site.name)
+                    .setContentText("Après FortiToken, touche ici pour reprendre Wonder Apps.")
+                    .setContentIntent(tap)
+                    .setVisibility(Notification.VISIBILITY_PRIVATE)
+                    .setAutoCancel(false)
+                    .build();
+            manager.notify(NOTIFICATION_VPN_RETURN, note);
+        } catch (SecurityException ignored) {
+            // Permission may have been revoked after the request.
+        }
+    }
+
     private void launchFortiClientForSite(SiteProfile site) {
+        if (site == null) return;
+        SharedPreferences settings = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        if (site.resumeAfterVpn && Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED
+                && !settings.getBoolean(KEY_VPN_NOTIFICATION_ASKED, false)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Retrouver WonderView après FortiToken")
+                    .setMessage("Android ne permet pas à Wonder Apps de reprendre "
+                            + "le premier plan de force après FortiClient. "
+                            + "Une notification facultative te permettra "
+                            + "de revenir à " + site.name + " en un appui. "
+                            + "Sans autorisation, reviens par les applications récentes.")
+                    .setPositiveButton("Autoriser le rappel", (d,w) -> {
+                        pendingVpnPermissionSiteId = site.id;
+                        settings.edit().putBoolean(KEY_VPN_NOTIFICATION_ASKED, true).apply();
+                        requestPermissions(
+                                new String[]{android.Manifest.permission.POST_NOTIFICATIONS},
+                                REQUEST_VPN_NOTIFICATION_PERMISSION);
+                    })
+                    .setNeutralButton("Continuer sans rappel", (d,w) -> {
+                        settings.edit().putBoolean(KEY_VPN_NOTIFICATION_ASKED, true).apply();
+                        launchFortiClientNow(site);
+                    })
+                    .setNegativeButton("Annuler", null)
+                    .show();
+            return;
+        }
+        launchFortiClientNow(site);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode,
+                                           String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_VPN_NOTIFICATION_PERMISSION) return;
+        String id = pendingVpnPermissionSiteId;
+        pendingVpnPermissionSiteId = null;
+        if (id == null) return;
+        SiteProfile site = findById(loadSites(), id);
+        if (site != null && requiresVpn(site)) launchFortiClientNow(site);
+    }
+
+    private void launchFortiClientNow(SiteProfile site) {
         if (site == null) return;
         Intent launch = getPackageManager()
                 .getLaunchIntentForPackage(FORTICLIENT_VPN_PACKAGE);
@@ -1856,13 +1966,13 @@ public class MainActivity extends Activity {
             return;
         }
 
-        waitingVpnSiteId = site.resumeAfterVpn ? site.id : null;
-        waitingVpnStartedAt = System.currentTimeMillis();
+        rememberPendingVpnSite(site);
         try {
+            if (site.resumeAfterVpn) showVpnReturnNotification(site);
             startActivity(launch);
             logEvent("Ouverture FortiClient", site.name);
         } catch (Exception e) {
-            waitingVpnSiteId = null;
+            clearPendingVpnSite();
             Toast.makeText(this, "Impossible d’ouvrir FortiClient VPN",
                     Toast.LENGTH_LONG).show();
         }
