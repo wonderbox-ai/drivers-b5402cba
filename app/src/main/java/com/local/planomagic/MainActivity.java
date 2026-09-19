@@ -2901,7 +2901,7 @@ public class MainActivity extends Activity {
                 "Réinitialiser sa session",
                 "Créer / recréer le raccourci Android",
                 "Tester l’accès",
-                "Ré-analyser la connexion",
+                isInternalHttp(site) ? "Informations HTTP et VPN" : "Ré-analyser la connexion",
                 "Signaler un problème",
                 "Supprimer"
         };
@@ -2912,7 +2912,9 @@ public class MainActivity extends Activity {
                     if (which == 0) openCustom(site);
                     else if (which == 1) editSiteAddress(site);
                     else if (which == 2) {
-                        if (isAtlassianCloudSite(site)) {
+                        if (isInternalHttp(site)) {
+                            showInternalHttpInfo(site);
+                        } else if (isAtlassianCloudSite(site)) {
                             showProfessionalConnectionInfo(site);
                         } else if (isBrowserPreferred(site)) {
                             showSiteOpeningMode(site);
@@ -2925,10 +2927,28 @@ public class MainActivity extends Activity {
                     else if (which == 7) resetSiteSession(site.id, site.url, "BASIC".equals(site.authType));
                     else if (which == 8) pinSiteShortcut(site.id, site.name);
                     else if (which == 9) testSiteAccess(site.name, site.url, site.vpnRequired);
-                    else if (which == 10) confirmReanalyzeSite(site);
+                    else if (which == 10) {
+                        if (isInternalHttp(site)) showInternalHttpInfo(site);
+                        else confirmReanalyzeSite(site);
+                    }
                     else if (which == 11) showFeedbackDialog("Problème sur " + site.name + " :\n");
                     else confirmDeleteSite(site);
                 })
+                .show();
+    }
+
+    private void showInternalHttpInfo(SiteProfile site) {
+        new AlertDialog.Builder(this)
+                .setTitle("Accès interne • " + site.name)
+                .setMessage("Ce site utilise HTTP sur le réseau Wonderbox. "
+                        + "Active le VPN professionnel avant de l’ouvrir. "
+                        + "Wonder Apps le lance uniquement dans ton navigateur "
+                        + "et ne conserve aucun mot de passe pour lui. "
+                        + "Le VPN ne remplace pas le chiffrement HTTPS de bout en bout.")
+                .setPositiveButton("Ouvrir", (d,w) -> openCustom(site))
+                .setNeutralButton("Choisir le navigateur",
+                        (d,w) -> showSiteOpeningMode(site))
+                .setNegativeButton("Fermer", null)
                 .show();
     }
 
@@ -2937,25 +2957,33 @@ public class MainActivity extends Activity {
         SiteProfile saved = findById(sites, site.id);
         if (saved == null) return;
 
-        String[] modes = {
-                "Automatique • Edge si disponible pour les connexions pro",
-                "Ouvrir directement dans Wonder Apps",
-                "Microsoft Edge",
-                "Google Chrome",
-                "Samsung Internet",
-                "Navigateur par défaut du téléphone"
-        };
-        String[] values = {"AUTO", "IN_APP", "EDGE", "CHROME", "SAMSUNG", "BROWSER"};
+        boolean http = isInternalHttp(saved);
+        String[] modes = http
+                ? new String[]{
+                    "Navigateur par défaut du téléphone",
+                    "Samsung Internet",
+                    "Microsoft Edge",
+                    "Google Chrome"
+                }
+                : new String[]{
+                    "Automatique • Edge si disponible pour les connexions pro",
+                    "Ouvrir directement dans Wonder Apps",
+                    "Microsoft Edge",
+                    "Google Chrome",
+                    "Samsung Internet",
+                    "Navigateur par défaut du téléphone"
+                };
+        String[] values = http
+                ? new String[]{"BROWSER", "SAMSUNG", "EDGE", "CHROME"}
+                : new String[]{"AUTO", "IN_APP", "EDGE", "CHROME", "SAMSUNG", "BROWSER"};
         int initial = 0;
         for (int i = 0; i < values.length; i++) {
             if (values[i].equals(saved.openingMode)) initial = i;
         }
         final int[] selection = {initial};
 
-        // Android AlertDialog cannot display setMessage and setSingleChoiceItems
-        // simultaneously: setMessage previously hid every actual choice on Samsung.
         new AlertDialog.Builder(this)
-                .setTitle("Ouvrir " + saved.name)
+                .setTitle((http ? "Navigateur • " : "Ouvrir ") + saved.name)
                 .setSingleChoiceItems(modes, initial, (d, which) -> selection[0] = which)
                 .setPositiveButton("Enregistrer", (d,w) -> {
                     saved.openingMode = values[selection[0]];
@@ -3104,7 +3132,12 @@ public class MainActivity extends Activity {
         CheckBox screen = securityCheck("Bloquer les captures d’écran",
                 "Option par site, désactivée par défaut.", saved.blockScreenshots);
         CheckBox vpn = securityCheck("VPN / réseau interne requis",
-                "Affiche un diagnostic plus clair si le site n’est pas joignable.", saved.vpnRequired);
+                "Aide à ouvrir les outils accessibles uniquement via le réseau interne.",
+                saved.vpnRequired || isInternalHttp(saved));
+        if (isInternalHttp(saved)) {
+            vpn.setChecked(true);
+            vpn.setEnabled(false);
+        }
 
         stack.addView(bio);
         stack.addView(lock);
@@ -3121,7 +3154,7 @@ public class MainActivity extends Activity {
                     saved.requireBiometric = bio.isChecked();
                     saved.lockOnExit = !isBrowserPreferred(saved) && lock.isChecked();
                     saved.blockScreenshots = screen.isChecked();
-                    saved.vpnRequired = vpn.isChecked();
+                    saved.vpnRequired = isInternalHttp(saved) || vpn.isChecked();
                     saveSites(sites);
                     if (activeSite != null && saved.id.equals(activeSite.id)) {
                         activeSite.requireBiometric = saved.requireBiometric;
@@ -3174,6 +3207,26 @@ public class MainActivity extends Activity {
     }
 
     private void testSiteAccess(String name, String urlValue, boolean vpnRequired) {
+        Uri target = Uri.parse(urlValue);
+        if (SiteRoutingPolicy.isAllowedInternalHttp(target.getScheme(), target.getHost())) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Disponibilité • " + name)
+                    .setMessage("Ce site HTTP interne est ouvert par le navigateur via VPN. "
+                            + "Wonder Apps ne lance pas de requête HTTP non chiffrée "
+                            + "en arrière-plan et ne peut pas confirmer ta session "
+                            + "dans un navigateur externe. Active le VPN puis ouvre le site.")
+                    .setPositiveButton("Ouvrir", (d,w) -> {
+                        for (SiteProfile site : loadSites()) {
+                            if (urlValue.equals(site.url)) {
+                                openCustom(site);
+                                return;
+                            }
+                        }
+                    })
+                    .setNegativeButton("Fermer", null)
+                    .show();
+            return;
+        }
         Toast.makeText(this, "Test de disponibilité en cours…", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             HttpURLConnection connection = null;
