@@ -1282,6 +1282,7 @@ public class MainActivity extends Activity {
     }
 
     private void analyzeSite(SiteProfile site) {
+        if (offerKnownWonderViewAddressFix(site)) return;
         if (isInternalHttp(site)) {
             new AlertDialog.Builder(this)
                     .setTitle("Site interne HTTP")
@@ -1674,8 +1675,55 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private boolean offerKnownWonderViewAddressFix(SiteProfile site) {
+        if (site == null || site.url == null) return false;
+        Uri current = Uri.parse(site.url);
+        if (!SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                current.getScheme(), current.getHost())) return false;
+
+        final String corrected = current.buildUpon().scheme("http").build().toString();
+        new AlertDialog.Builder(this)
+                .setTitle("Corriger l’adresse de WonderView")
+                .setMessage("WonderView est enregistré en HTTPS, mais l’adresse "
+                        + "interne utilisée sur ton téléphone fonctionne en HTTP "
+                        + "via le VPN Wonderbox. Un VPN connecté ne peut pas "
+                        + "faire fonctionner le port HTTPS si le serveur le refuse.\n\n"
+                        + "Wonder Apps peut conserver ton chemin et corriger "
+                        + "uniquement https:// en http://. Le site sera alors "
+                        + "ouvert dans le navigateur du téléphone. Aucun "
+                        + "mot de passe ne sera conservé par Wonder Apps pour "
+                        + "ce site HTTP : le VPN ne remplace pas HTTPS.")
+                .setPositiveButton("Corriger et ouvrir", (dialog, which) -> {
+                    List<SiteProfile> sites = loadSites();
+                    SiteProfile saved = findById(sites, site.id);
+                    if (saved == null) return;
+                    Uri savedUri = Uri.parse(saved.url);
+                    if (!SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                            savedUri.getScheme(), savedUri.getHost())) return;
+
+                    saved.url = corrected;
+                    saved.autoConnect = false;
+                    saved.authType = "NONE";
+                    saved.loginHost = "";
+                    saved.username = "";
+                    saved.password = "";
+                    saved.basicUsername = "";
+                    saved.basicPassword = "";
+                    saved.openingMode = "BROWSER";
+                    saved.vpnRequired = true;
+                    saved.lockOnExit = false;
+                    saveSites(sites);
+                    showHome("Adresse WonderView corrigée");
+                    openCustom(saved);
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+        return true;
+    }
+
     private void openCustom(SiteProfile site) {
         if (site == null) return;
+        if (offerKnownWonderViewAddressFix(site)) return;
         if (waitingVpnSiteId != null) {
             // Any manual tap supersedes the previously queued VPN handoff.
             waitingVpnSiteId = null;
@@ -1878,6 +1926,7 @@ public class MainActivity extends Activity {
     }
 
     private void openBrowserForSite(SiteProfile site) {
+        if (offerKnownWonderViewAddressFix(site)) return;
         if (hasInvalidProviderEntryPoint(site)) {
             explainEntryPoint(site);
             return;
@@ -1967,6 +2016,7 @@ public class MainActivity extends Activity {
 
     private void openCustomNow(SiteProfile site) {
         if (site == null) return;
+        if (offerKnownWonderViewAddressFix(site)) return;
 
         browserHandoffStarted = false;
         recordSiteUse(site);
