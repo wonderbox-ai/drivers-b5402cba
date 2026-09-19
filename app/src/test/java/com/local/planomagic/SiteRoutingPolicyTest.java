@@ -67,6 +67,17 @@ public class SiteRoutingPolicyTest {
                 "id.atlassian.com", "id.atlassian.com", "BASIC_FORM"));
     }
 
+    @Test public void onlyWonderViewNeedsVpnByDefaultNotNova() {
+        assertTrue(SiteRoutingPolicy.requiresVpn(
+                "http", "wonderview.wonderbox.vpn", false));
+        assertFalse(SiteRoutingPolicy.requiresVpn(
+                "https", "nova.wonderbox.com", false));
+        assertFalse(SiteRoutingPolicy.requiresVpn(
+                "https", "plano.wonderbox.com", false));
+        assertTrue(SiteRoutingPolicy.requiresVpn(
+                "https", "an-internal-service.example", true));
+    }
+
     @Test public void autoLockIsEvaluatedBeforeShortcutOpens() {
         long backgroundAt = 1_000_000L;
         assertFalse(SiteRoutingPolicy.shouldRelock(backgroundAt, backgroundAt + 59000, 60));
