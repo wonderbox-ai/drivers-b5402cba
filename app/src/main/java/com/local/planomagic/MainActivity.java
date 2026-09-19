@@ -3428,8 +3428,28 @@ public class MainActivity extends Activity {
 
     private void editSiteCredentials(SiteProfile site) {
         if (site == null) return;
+        if (isInternalHttp(site)) {
+            showInternalHttpInfo(site);
+            return;
+        }
         if (isAtlassianCloudSite(site)) {
             showProfessionalConnectionInfo(site);
+            return;
+        }
+
+        if ("BASIC_FORM".equals(site.authType)) {
+            editTwoStepCredentials(site);
+            return;
+        }
+
+        if (!site.autoConnect) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Connexion manuelle • " + site.name)
+                    .setMessage("La connexion automatique est désactivée pour "
+                            + site.name + ". Tu peux la réactiver dans « Modifier le site ».")
+                    .setPositiveButton("Modifier le site", (d,w) -> editSiteAddress(site))
+                    .setNegativeButton("Fermer", null)
+                    .show();
             return;
         }
 
@@ -3437,7 +3457,7 @@ public class MainActivity extends Activity {
             new AlertDialog.Builder(this)
                     .setTitle("Identifiants non nécessaires")
                     .setMessage("La méthode détectée est : " + authLabel(site.authType)
-                            + ". L’application ne tentera pas de contourner un SSO ou un MFA.")
+                            + ". Wonder Apps ne contourne pas le SSO ni la MFA.")
                     .setPositiveButton("OK", null)
                     .show();
             return;
@@ -3447,42 +3467,101 @@ public class MainActivity extends Activity {
         EditText pass = input(site.password.isEmpty()
                 ? "Mot de passe"
                 : "Nouveau mot de passe (vide = conserver)", true);
-
         user.setText(site.username);
 
-        AlertDialog d = new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Identifiants • " + site.name)
+                .setMessage("Les identifiants sont chiffrés localement et utilisés "
+                        + "uniquement sur l’hôte de connexion configuré.")
                 .setView(form(user, pass))
                 .setPositiveButton("Enregistrer", null)
                 .setNegativeButton("Annuler", null)
                 .create();
 
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String u = user.getText().toString().trim();
-            String p = pass.getText().toString();
+        dialog.setOnShowListener(x ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                    String username = user.getText().toString().trim();
+                    String password = pass.getText().toString();
 
-            if (u.isEmpty() || (site.password.isEmpty() && p.isEmpty())) {
-                Toast.makeText(this, "Identifiant et mot de passe requis", Toast.LENGTH_SHORT).show();
-                return;
-            }
+                    if (username.isEmpty() || (site.password.isEmpty() && password.isEmpty())) {
+                        Toast.makeText(this, "Identifiant et mot de passe requis",
+                                Toast.LENGTH_SHORT).show();
+                        return;
+                    }
 
-            List<SiteProfile> sites = loadSites();
-            SiteProfile saved = findById(sites, site.id);
+                    List<SiteProfile> sites = loadSites();
+                    SiteProfile saved = findById(sites, site.id);
+                    if (saved == null) return;
+                    saved.username = username;
+                    if (!password.isEmpty()) saved.password = password;
+                    saveSites(sites);
+                    dialog.dismiss();
+                    showHome("Identifiants configurés pour " + saved.name);
+                }));
+        dialog.show();
+    }
 
-            if (saved == null) {
-                saved = site;
-                sites.add(saved);
-            }
+    private void editTwoStepCredentials(SiteProfile site) {
+        if (site == null || isInternalHttp(site) || isAtlassianCloudSite(site)
+                || !"BASIC_FORM".equals(site.authType)) return;
 
-            saved.username = u;
-            if (!p.isEmpty()) saved.password = p;
+        EditText firstUser = input("Étape 1 • Identifiant d’accès au site", false);
+        EditText firstPass = input(site.basicPassword.isEmpty()
+                ? "Étape 1 • Mot de passe d’accès"
+                : "Étape 1 • Nouveau mot de passe (vide = conserver)", true);
+        EditText secondUser = input("Étape 2 • Identifiant professionnel / AD", false);
+        EditText secondPass = input(site.password.isEmpty()
+                ? "Étape 2 • Mot de passe professionnel / AD"
+                : "Étape 2 • Nouveau mot de passe (vide = conserver)", true);
+        firstUser.setText(site.basicUsername);
+        secondUser.setText(site.username);
 
-            saveSites(sites);
-            d.dismiss();
-            showHome("Identifiants enregistrés");
-        }));
+        ScrollView content = new ScrollView(this);
+        content.setFillViewport(false);
+        content.addView(form(firstUser, firstPass, secondUser, secondPass));
 
-        d.show();
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Connexion en deux étapes • " + site.name)
+                .setMessage("Comme Plano : accès HTTPS au site, puis formulaire "
+                        + "professionnel. Les quatre valeurs sont propres à "
+                        + site.name + " et chiffrées localement ; les mots de passe "
+                        + "ne sont jamais copiés depuis Plano.")
+                .setView(content)
+                .setPositiveButton("Enregistrer", null)
+                .setNegativeButton("Annuler", null)
+                .create();
+
+        dialog.setOnShowListener(x ->
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                    String user1 = firstUser.getText().toString().trim();
+                    String pass1 = firstPass.getText().toString();
+                    String user2 = secondUser.getText().toString().trim();
+                    String pass2 = secondPass.getText().toString();
+
+                    if (user1.isEmpty() || user2.isEmpty()
+                            || (site.basicPassword.isEmpty() && pass1.isEmpty())
+                            || (site.password.isEmpty() && pass2.isEmpty())) {
+                        Toast.makeText(this, "Renseigne les deux identifiants et mots de passe",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+
+                    List<SiteProfile> sites = loadSites();
+                    SiteProfile saved = findById(sites, site.id);
+                    if (saved == null || !"BASIC_FORM".equals(saved.authType)
+                            || isInternalHttp(saved)) return;
+
+                    saved.basicUsername = user1;
+                    if (!pass1.isEmpty()) saved.basicPassword = pass1;
+                    saved.username = user2;
+                    if (!pass2.isEmpty()) saved.password = pass2;
+                    saved.autoConnect = true;
+                    saved.loginHost = Uri.parse(saved.url).getHost();
+                    saveSites(sites);
+                    dialog.dismiss();
+                    showHome("Connexion en deux étapes configurée pour " + saved.name);
+                }));
+        dialog.show();
     }
 
     private void confirmDeleteSite(SiteProfile site) {
