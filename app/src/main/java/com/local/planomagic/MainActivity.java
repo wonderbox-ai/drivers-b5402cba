@@ -1201,22 +1201,18 @@ public class MainActivity extends Activity {
         String allowed = site.loginHost == null || site.loginHost.isEmpty()
                 ? Uri.parse(site.url).getHost()
                 : site.loginHost;
-        return allowed != null && allowed.equalsIgnoreCase(host);
+        return SiteRoutingPolicy.mayInjectCredentials(allowed, host, site.authType);
     }
 
     private boolean commonSsoHost(String host) {
-        if (host == null) return false;
-        String h = host.toLowerCase(Locale.ROOT);
-        return h.equals("login.microsoftonline.com")
-                || h.equals("accounts.google.com")
-                || h.contains("okta")
-                || h.contains("auth0")
-                || h.contains("onelogin")
-                || h.contains("pingidentity");
+        return SiteRoutingPolicy.isIdentityProviderHost(host);
     }
 
     private void analyzeSite(SiteProfile site) {
-        clearWebSession();
+        // Analyzing Jira must never log the user out of Plano or other sites.
+        clearTransientState();
+        web.stopLoading();
+        web.loadUrl("about:blank");
 
         activeSite = site;
         mode = Mode.CUSTOM;
@@ -1390,7 +1386,7 @@ public class MainActivity extends Activity {
                 status("Connexion Plano 2/2…");
                 timer.postDelayed(this::checkPlanoFailure, 7000);
             } else {
-                status("Connecté");
+                status("Page ouverte • connexion à confirmer");
             }
         });
     }
@@ -1398,6 +1394,12 @@ public class MainActivity extends Activity {
     private void tryGenericLogin() {
         if (activeSite == null || genericFormTried) return;
         if (!"FORM".equals(activeSite.authType)) return;
+        if (isAtlassianCloudSite(activeSite)) {
+            status("Connexion professionnelle • authentification manuelle");
+            return;
+        }
+        String currentHost = web.getUrl() == null ? null : Uri.parse(web.getUrl()).getHost();
+        if (!sameConfiguredHost(activeSite, currentHost)) return;
         if (activeSite.username.isEmpty() || activeSite.password.isEmpty()) return;
 
         String user = JSONObject.quote(activeSite.username);
@@ -1409,7 +1411,7 @@ public class MainActivity extends Activity {
                 status("Connexion automatique…");
                 timer.postDelayed(() -> checkGenericSessionState(activeSite), 4500);
             } else {
-                status("Prêt");
+                status("Formulaire prêt • connexion à confirmer");
             }
         });
     }
@@ -1425,7 +1427,7 @@ public class MainActivity extends Activity {
                     if ("true".equals(r)) {
                         status("Connexion nécessaire");
                     } else {
-                        status("Prêt");
+                        status("Page ouverte • connexion à confirmer");
                     }
                 });
     }
@@ -1489,7 +1491,7 @@ public class MainActivity extends Activity {
                 } else if (visible) {
                     status("Formulaire de connexion prêt");
                 } else {
-                    status("Connecté");
+                    status("Page ouverte • connexion à confirmer");
                 }
             } catch (Exception ex) {
                 status("Connexion en cours…");
@@ -1531,27 +1533,17 @@ public class MainActivity extends Activity {
 
     private boolean isAtlassianCloudSite(SiteProfile site) {
         if (site == null || site.url == null) return false;
-        String host = Uri.parse(site.url).getHost();
-        if (host == null) return false;
-        String lower = host.toLowerCase(Locale.ROOT);
-        return lower.endsWith(".atlassian.net");
+        return SiteRoutingPolicy.isAtlassianCloudHost(Uri.parse(site.url).getHost());
     }
 
     private boolean isProviderEntryHost(String host) {
-        return commonSsoHost(host) || "id.atlassian.com".equalsIgnoreCase(host);
+        return SiteRoutingPolicy.isIdentityProviderHost(host);
     }
 
     private boolean isBrowserPreferred(SiteProfile site) {
         if (site == null) return false;
-        if ("IN_APP".equals(site.openingMode)) return false;
-        if ("BROWSER".equals(site.openingMode)
-                || "EDGE".equals(site.openingMode)
-                || "CHROME".equals(site.openingMode)
-                || "SAMSUNG".equals(site.openingMode)) return true;
-        // Atlassian Cloud may first display its own form before redirecting to
-        // the organization's Microsoft SSO. Do not inject saved passwords there.
-        return isAtlassianCloudSite(site)
-                || "SSO".equals(site.authType) || "MFA".equals(site.authType);
+        String host = site.url == null ? null : Uri.parse(site.url).getHost();
+        return SiteRoutingPolicy.useExternalBrowser(host, site.authType, site.openingMode);
     }
 
     private boolean hasInvalidProviderEntryPoint(SiteProfile site) {
