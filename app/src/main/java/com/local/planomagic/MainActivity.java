@@ -98,6 +98,8 @@ public class MainActivity extends Activity {
         String url = "";
         String username = "";
         String password = "";
+        String basicUsername = "";
+        String basicPassword = "";
         String authType = "PENDING";
         String loginHost = "";
         String openingMode = "AUTO";
@@ -121,6 +123,8 @@ public class MainActivity extends Activity {
             o.put("url", url);
             o.put("username", username);
             o.put("password", password);
+            o.put("basicUsername", basicUsername);
+            o.put("basicPassword", basicPassword);
             o.put("authType", authType);
             o.put("loginHost", loginHost);
             o.put("openingMode", openingMode);
@@ -144,6 +148,8 @@ public class MainActivity extends Activity {
             s.url = o.optString("url", "");
             s.username = o.optString("username", "");
             s.password = o.optString("password", "");
+            s.basicUsername = o.optString("basicUsername", "");
+            s.basicPassword = o.optString("basicPassword", "");
             s.authType = o.optString("authType", "PENDING");
             s.loginHost = o.optString("loginHost", "");
             String opening = o.optString("openingMode", "AUTO");
@@ -993,6 +999,8 @@ public class MainActivity extends Activity {
                 && (site.username.isEmpty() || site.password.isEmpty())) {
             return "Identifiants à configurer";
         }
+        if ("DUAL".equals(type)) return dualConfigured(site)
+                ? "Connexion en 2 étapes configurée" : "Connexion en 2 étapes à configurer";
         if ("FORM".equals(type) || "BASIC".equals(type)) return "Connexion auto configurée";
         return "Page accessible"; // Never equate loading a page with being authenticated.
     }
@@ -1000,7 +1008,8 @@ public class MainActivity extends Activity {
     private String authShort(String type) {
         switch (type) {
             case "FORM":
-            case "BASIC": return "AUTO";
+            case "BASIC":
+            case "DUAL": return "AUTO";
             case "SSO": return "PRO";
             case "MFA": return "MFA";
             case "NONE": return "WEB";
@@ -1012,6 +1021,7 @@ public class MainActivity extends Activity {
         switch (type) {
             case "FORM": return "formulaire détecté";
             case "BASIC": return "HTTP Basic détecté";
+            case "DUAL": return "Deux étapes : HTTP Basic puis formulaire AD";
             case "SSO": return "SSO détecté";
             case "MFA": return "MFA détecté";
             case "NONE": return "aucune connexion détectée";
@@ -1021,7 +1031,8 @@ public class MainActivity extends Activity {
     }
 
     private int authColor(String type) {
-        if ("FORM".equals(type) || "BASIC".equals(type)) return Color.rgb(45,160,90);
+        if ("FORM".equals(type) || "BASIC".equals(type) || "DUAL".equals(type))
+            return Color.rgb(45,160,90);
         if ("SSO".equals(type) || "MFA".equals(type)) return Color.rgb(220,150,35);
         if ("UNKNOWN".equals(type)) return Color.rgb(210,80,70);
         return accent();
@@ -1597,6 +1608,7 @@ public class MainActivity extends Activity {
     private boolean isBrowserPreferred(SiteProfile site) {
         if (site == null) return false;
         if (isInternalHttp(site)) return true; // Even when old settings claim IN_APP.
+        if ("DUAL".equals(site.authType)) return false; // Two-step login is integrated and HTTPS-only.
         String host = site.url == null ? null : Uri.parse(site.url).getHost();
         return SiteRoutingPolicy.useExternalBrowser(host, site.authType, site.openingMode);
     }
