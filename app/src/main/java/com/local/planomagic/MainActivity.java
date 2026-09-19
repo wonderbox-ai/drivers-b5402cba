@@ -196,7 +196,13 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         captureLauncherIntent(intent);
-        if (unlocked) handlePendingShortcut();
+        // Android may deliver a launcher shortcut before onStart. Evaluate the
+        // background timeout *before* handling the shortcut, never after.
+        if (unlocked && backgroundLockExpired()) {
+            lockFromBackground();
+        } else if (unlocked) {
+            handlePendingShortcut();
+        }
     }
 
     private void captureLauncherIntent(Intent intent) {
@@ -357,6 +363,7 @@ public class MainActivity extends Activity {
     private void unlockApp() {
         if (unlocked || isFinishing()) return;
         unlocked = true;
+        backgroundAt = 0L;
         unlockFallbackStarted = false;
         root.setVisibility(View.VISIBLE);
         showHome("Déverrouillé");
@@ -3766,6 +3773,21 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean backgroundLockExpired() {
+        int seconds = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .getInt(KEY_AUTO_LOCK_SECONDS, 60);
+        return SiteRoutingPolicy.shouldRelock(
+                backgroundAt, System.currentTimeMillis(), seconds);
+    }
+
+    private void lockFromBackground() {
+        backgroundAt = 0L;
+        unlocked = false;
+        unlockFallbackStarted = false;
+        if (root != null) root.setVisibility(View.INVISIBLE);
+        requestUnlock();
+    }
+
     @Override
     protected void onStop() {
         super.onStop();
@@ -3776,17 +3798,10 @@ public class MainActivity extends Activity {
     protected void onStart() {
         super.onStart();
         if (!unlocked || backgroundAt <= 0L || isFinishing()) return;
-
-        int seconds = getSharedPreferences(SETTINGS, MODE_PRIVATE)
-                .getInt(KEY_AUTO_LOCK_SECONDS, 60);
-        long elapsed = System.currentTimeMillis() - backgroundAt;
-        backgroundAt = 0L;
-
-        if (seconds > 0 && elapsed >= seconds * 1000L) {
-            unlocked = false;
-            unlockFallbackStarted = false;
-            if (root != null) root.setVisibility(View.INVISIBLE);
-            requestUnlock();
+        if (backgroundLockExpired()) {
+            lockFromBackground();
+        } else {
+            backgroundAt = 0L;
         }
     }
 
