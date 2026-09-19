@@ -61,7 +61,8 @@ final class SiteRoutingPolicy {
 
     static boolean mayInjectCredentials(String configuredHost, String currentHost,
                                         String authType) {
-        if (!"FORM".equals(authType) && !"BASIC".equals(authType)) return false;
+        if (!"FORM".equals(authType) && !"BASIC".equals(authType)
+                && !"BASIC_FORM".equals(authType)) return false;
         if (configuredHost == null || currentHost == null) return false;
         if (!configuredHost.equalsIgnoreCase(currentHost)) return false;
         return !isIdentityProviderHost(currentHost);
