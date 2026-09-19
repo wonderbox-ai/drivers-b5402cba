@@ -1764,32 +1764,112 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void requestSiteAuthentication(String siteName, Runnable onSuccess) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+    private void showSitePinUnlockDialog(String siteName, Runnable onSuccess) {
+        if (!pinManager.hasPin()) {
             new AlertDialog.Builder(this)
-                    .setTitle("Biométrie indisponible")
-                    .setMessage("Cette protection nécessite Android 9 ou une version plus récente.")
-                    .setPositiveButton("OK", null)
+                    .setTitle("Code PIN Wonder Apps requis")
+                    .setMessage("Configure un code PIN Wonder Apps pour pouvoir utiliser "
+                            + "la protection renforcée de " + siteName + ".")
+                    .setPositiveButton("Configurer", (d,w) ->
+                            showPinSetup(() -> requestSiteAuthentication(siteName, onSuccess)))
+                    .setNegativeButton("Annuler", null)
                     .show();
             return;
         }
 
+        EditText pin = input("Code PIN Wonder Apps", true);
+        pin.setInputType(InputType.TYPE_CLASS_NUMBER
+                | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        final int[] attempts = {0};
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Accès sécurisé • " + siteName)
+                .setMessage("Utilise ton code PIN Wonder Apps pour cette application.")
+                .setView(form(pin))
+                .setPositiveButton("Déverrouiller", null)
+                .setNegativeButton("Annuler", null)
+                .create();
+
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    if (pinManager.verifyPin(pin.getText().toString())) {
+                        dialog.dismiss();
+                        // A timeout may have locked Wonder Apps while the prompt was active.
+                        if (unlocked && !isFinishing() && onSuccess != null) {
+                            onSuccess.run();
+                        } else if (!unlocked) {
+                            requestUnlock();
+                        }
+                        return;
+                    }
+
+                    attempts[0]++;
+                    pin.setText("");
+                    if (attempts[0] >= 5) {
+                        dialog.dismiss();
+                        Toast.makeText(this,
+                                "Trop de tentatives. Réessaie plus tard.",
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        pin.setError("Code PIN incorrect");
+                    }
+                }));
+        dialog.show();
+    }
+
+    private void requestSiteAuthentication(String siteName, Runnable onSuccess) {
+        if (!pinManager.hasPin()) {
+            showSitePinUnlockDialog(siteName, onSuccess);
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            showSitePinUnlockDialog(siteName, onSuccess);
+            return;
+        }
+
+        final boolean[] handled = {false};
         try {
             CancellationSignal signal = new CancellationSignal();
             new BiometricPrompt.Builder(this)
                     .setTitle("Accès sécurisé • " + siteName)
                     .setSubtitle("Confirme ton identité pour ouvrir cette application")
-                    .setNegativeButton("Annuler", getMainExecutor(), (dialog, which) -> {})
+                    .setNegativeButton("Code PIN Wonder Apps", getMainExecutor(),
+                            (dialog, which) -> {
+                                if (handled[0]) return;
+                                handled[0] = true;
+                                showSitePinUnlockDialog(siteName, onSuccess);
+                            })
                     .build()
                     .authenticate(signal, getMainExecutor(), new BiometricPrompt.AuthenticationCallback() {
                         @Override
                         public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
                             super.onAuthenticationSucceeded(result);
-                            if (onSuccess != null) onSuccess.run();
+                            if (handled[0]) return;
+                            handled[0] = true;
+                            if (unlocked && !isFinishing() && onSuccess != null) {
+                                onSuccess.run();
+                            } else if (!unlocked) {
+                                requestUnlock();
+                            }
+                        }
+
+                        @Override
+                        public void onAuthenticationError(int errorCode, CharSequence message) {
+                            super.onAuthenticationError(errorCode, message);
+                            if (handled[0]) return;
+                            handled[0] = true;
+                            if (errorCode != BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED
+                                    && errorCode != BiometricPrompt.BIOMETRIC_ERROR_NEGATIVE_BUTTON
+                                    && errorCode != BiometricPrompt.BIOMETRIC_ERROR_CANCELED) {
+                                showSitePinUnlockDialog(siteName, onSuccess);
+                            }
                         }
                     });
-        } catch (Exception e) {
-            Toast.makeText(this, "Biométrie indisponible sur ce téléphone", Toast.LENGTH_LONG).show();
+        } catch (Exception unavailable) {
+            if (!handled[0]) {
+                handled[0] = true;
+                showSitePinUnlockDialog(siteName, onSuccess);
+            }
         }
     }
 
