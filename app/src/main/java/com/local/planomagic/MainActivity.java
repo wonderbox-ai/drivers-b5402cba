@@ -1706,6 +1706,26 @@ public class MainActivity extends Activity {
         return bitmap;
     }
 
+    private Bitmap quickActionIcon(String symbol) {
+        final int size = 192;
+        Bitmap result = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(result);
+
+        Paint panel = new Paint(Paint.ANTI_ALIAS_FLAG);
+        panel.setColor(Color.rgb(12, 12, 12));
+        canvas.drawRoundRect(4, 4, size - 4, size - 4, 45, 45, panel);
+
+        Paint mark = new Paint(Paint.ANTI_ALIAS_FLAG);
+        mark.setColor(Color.WHITE);
+        mark.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        mark.setTextAlign(Paint.Align.CENTER);
+        mark.setTextSize(108);
+        Paint.FontMetrics fm = mark.getFontMetrics();
+        float baseline = size / 2f - (fm.ascent + fm.descent) / 2f;
+        canvas.drawText(symbol, size / 2f, baseline, mark);
+        return result;
+    }
+
     private ShortcutInfo launcherShortcut(String id, String label, String action, String siteId,
                                               Bitmap bitmap, int rank) {
         Intent intent = new Intent(this, MainActivity.class);
@@ -1720,7 +1740,9 @@ public class MainActivity extends Activity {
                 .setRank(rank);
 
         if (bitmap != null) builder.setIcon(Icon.createWithBitmap(bitmap));
-        else builder.setIcon(Icon.createWithResource(this, R.drawable.ic_launcher_foreground));
+        else builder.setIcon(Icon.createWithBitmap(quickActionIcon(
+                ACTION_ADD_SITE.equals(action) ? "+" :
+                ACTION_FEEDBACK.equals(action) ? "✦" : "⚙")));
         return builder.build();
     }
 
@@ -3300,7 +3322,7 @@ public class MainActivity extends Activity {
                 JSONObject payload = new JSONObject();
                 payload.put("message", message);
                 payload.put("source", "Wonder Apps Android");
-                payload.put("version", "3.2");
+                payload.put("version", "3.3");
 
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(body.length);
@@ -3392,7 +3414,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 3.2\n\n"
+                .setMessage("Wonder Apps\nVersion 3.3\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
