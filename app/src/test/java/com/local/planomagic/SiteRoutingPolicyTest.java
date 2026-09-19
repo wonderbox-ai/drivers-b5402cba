@@ -56,6 +56,17 @@ public class SiteRoutingPolicyTest {
                 "http", "example.com"));
     }
 
+    @Test public void twoStepAutomaticUsesOnlyExplicitExactHost() {
+        assertTrue(SiteRoutingPolicy.mayInjectCredentials(
+                "nova.wonderbox.com", "nova.wonderbox.com", "BASIC_FORM"));
+        assertFalse(SiteRoutingPolicy.mayInjectCredentials(
+                "nova.wonderbox.com", "login.microsoftonline.com", "BASIC_FORM"));
+        assertFalse(SiteRoutingPolicy.mayInjectCredentials(
+                "nova.wonderbox.com", "nova.wonderbox.com.evil.example", "BASIC_FORM"));
+        assertFalse(SiteRoutingPolicy.mayInjectCredentials(
+                "id.atlassian.com", "id.atlassian.com", "BASIC_FORM"));
+    }
+
     @Test public void autoLockIsEvaluatedBeforeShortcutOpens() {
         long backgroundAt = 1_000_000L;
         assertFalse(SiteRoutingPolicy.shouldRelock(backgroundAt, backgroundAt + 59000, 60));
