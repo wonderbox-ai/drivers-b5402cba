@@ -47,6 +47,16 @@ final class SiteRoutingPolicy {
                 && value.length() > ".wonderbox.vpn".length();
     }
 
+    /**
+     * The confirmed legacy WonderView endpoint is HTTP. Do not downgrade
+     * unrelated VPN hosts or a future new HTTPS deployment automatically.
+     * Require the user's explicit confirmation before a stored URL is changed.
+     */
+    static boolean isKnownWonderViewHttpsMismatch(String scheme, String host) {
+        return "https".equalsIgnoreCase(scheme)
+                && "wonderview.wonderbox.vpn".equalsIgnoreCase(host);
+    }
+
     static boolean isAllowedInternalHttp(String scheme, String host) {
         return "http".equalsIgnoreCase(scheme) && isWonderboxVpnHost(host);
     }
