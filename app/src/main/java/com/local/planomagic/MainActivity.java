@@ -1664,7 +1664,9 @@ public class MainActivity extends Activity {
         }
 
         Runnable open = () -> {
-            if (isInternalHttp(site)) {
+            if (isInternalHttp(site) || !site.autoConnect) {
+                // Manual connections must not trigger automatic analysis or
+                // have their HTTP Basic challenges silently cancelled.
                 openBrowserForSite(site);
             } else if ("BASIC_FORM".equals(site.authType)
                     && (site.basicUsername.isEmpty() || site.basicPassword.isEmpty()
@@ -4226,7 +4228,8 @@ public class MainActivity extends Activity {
                         + "• Clé cryptographique conservée dans Android Keystore\n"
                         + "• Wonder Apps ne transmet pas les mots de passe qu’il conserve aux navigateurs externes\n"
                         + "• Edge/Chrome/Samsung peuvent conserver leurs propres sessions\n"
-                        + "• Ajout de sites limité à HTTPS\n"
+                        + "• HTTPS requis pour les connexions intégrées et automatiques\n"
+                        + "• HTTP interne *.wonderbox.vpn : navigateur externe après avertissement\n"
                         + "• Injection uniquement sur un hôte de connexion vérifié, jamais vers les fournisseurs Microsoft/Atlassian\n"
                         + "• SSO/MFA : aucune tentative de contournement\n"
                         + "• Sauvegardes exportées chiffrées par mot de passe\n\n"
@@ -4237,9 +4240,14 @@ public class MainActivity extends Activity {
     }
 
     private void showAbout() {
+        String version = "en cours";
+        try {
+            version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {}
+
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("WONDER APPS • Version 3.8\n\n"
+                .setMessage("WONDER APPS • Version " + version + "\n\n"
                         + "Conception : Younes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions "
                         + "que l’on supprime chaque jour. »\n\n"
@@ -4248,10 +4256,10 @@ public class MainActivity extends Activity {
                         + "vers les applications professionnelles, gagner du temps "
                         + "sur les connexions répétitives et rendre les outils "
                         + "plus accessibles au quotidien.\n\n"
-                        + "La connexion automatique est facultative et propre "
-                        + "à chaque site ; elle respecte les contrôles SSO, MFA "
-                        + "et VPN. Les identifiants confiés à Wonder Apps sont "
-                        + "chiffrés sur l’appareil.")
+                        + "L’automatisation est facultative et propre à chaque site ; "
+                        + "elle respecte le SSO, la MFA et les contraintes VPN. "
+                        + "Les identifiants confiés à Wonder Apps sont chiffrés "
+                        + "localement sur l’appareil.")
                 .setPositiveButton("Fermer", null)
                 .show();
     }
