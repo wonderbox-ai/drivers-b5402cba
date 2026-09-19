@@ -753,6 +753,16 @@ public class MainActivity extends Activity {
         idea.setOnClickListener(v -> showFeedbackDialog());
         homeList.addView(idea);
 
+        TextView about = actionButton("ⓘ  À propos de Wonder Apps", false);
+        LinearLayout.LayoutParams aboutLp = new LinearLayout.LayoutParams(-1, dp(46));
+        aboutLp.setMargins(0, dp(2), 0, dp(7));
+        about.setLayoutParams(aboutLp);
+        about.setOnClickListener(v -> showAbout());
+        homeList.addView(about);
+        homeList.addView(smallNote(
+                "« La performance naît souvent des petites frictions "
+                        + "que l’on supprime chaque jour. »"));
+
         updateDynamicAppShortcuts();
     }
 
@@ -4207,12 +4217,20 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 3.7\n\n"
-                        + "Auteur :\nYounes AJBILOU\n\n"
-                        + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
-                        + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
-                        + "et améliorer la productivité, la fluidité et la performance.")
-                .setPositiveButton("OK", null)
+                .setMessage("WONDER APPS • Version 3.8\n\n"
+                        + "Conception : Younes AJBILOU\n\n"
+                        + "« La performance naît souvent des petites frictions "
+                        + "que l’on supprime chaque jour. »\n\n"
+                        + "POURQUOI CETTE APPLICATION ?\n"
+                        + "Offrir aux équipes Wonderbox un point d’entrée simple "
+                        + "vers les applications professionnelles, gagner du temps "
+                        + "sur les connexions répétitives et rendre les outils "
+                        + "plus accessibles au quotidien.\n\n"
+                        + "La connexion automatique est facultative et propre "
+                        + "à chaque site ; elle respecte les contrôles SSO, MFA "
+                        + "et VPN. Les identifiants confiés à Wonder Apps sont "
+                        + "chiffrés sur l’appareil.")
+                .setPositiveButton("Fermer", null)
                 .show();
     }
 
