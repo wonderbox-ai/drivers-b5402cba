@@ -1169,8 +1169,12 @@ public class MainActivity extends Activity {
             @Override public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler h, String host, String realm) {
                 if (analysisMode && activeSite != null) {
                     h.cancel();
-                    activeSite.loginHost = host == null ? "" : host;
-                    finishAnalysis(activeSite, "BASIC");
+                    String configuredHost = Uri.parse(activeSite.url).getHost();
+                    if (configuredHost != null && configuredHost.equalsIgnoreCase(host)
+                            && !SiteRoutingPolicy.isIdentityProviderHost(host)) {
+                        activeSite.loginHost = host;
+                        finishAnalysis(activeSite, "BASIC");
+                    }
                     return;
                 }
 
@@ -1217,6 +1221,9 @@ public class MainActivity extends Activity {
 
             @Override public void onPageFinished(WebView v, String u) {
                 Uri uri = Uri.parse(u);
+                if (onHome || !unlocked || "about".equalsIgnoreCase(uri.getScheme())) {
+                    return;
+                }
 
                 if (analysisMode && activeSite != null) {
                     timer.postDelayed(() -> analyzeCurrentPage(activeSite, uri), 700);
@@ -2886,6 +2893,12 @@ public class MainActivity extends Activity {
                     final String finalCategory = category.getText().toString().trim();
                     final boolean wantsAuto = !internalHttp && automatic.isChecked();
                     final boolean wantsTwoSteps = wantsAuto && twoSteps.isChecked();
+                    if (wantsTwoSteps && SiteRoutingPolicy.isAtlassianCloudHost(host)) {
+                        url.setError("Utilise la connexion professionnelle Atlassian / Microsoft");
+                        Toast.makeText(this, "La connexion Jira/Atlassian passe par le SSO, "
+                                + "pas par le parcours Plano/Nova.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
 
                     Runnable persist = () -> {
                         List<SiteProfile> sites = loadSites();
@@ -2937,6 +2950,10 @@ public class MainActivity extends Activity {
                             site.autoConnect = wantsAuto;
                             site.loginHost = wantsTwoSteps ? parsed.getHost() : "";
                             sites.add(site);
+                        }
+
+                        if (!site.autoConnect && "PENDING".equals(site.authType)) {
+                            site.authType = "NONE";
                         }
 
                         if (internalHttp) {
@@ -3029,7 +3046,8 @@ public class MainActivity extends Activity {
                     else if (which == 4) showSiteLogoMenu(site.id, site.name);
                     else if (which == 5) toggleSiteFavorite(site);
                     else if (which == 6) showSiteSecurity(site);
-                    else if (which == 7) resetSiteSession(site.id, site.url, "BASIC".equals(site.authType));
+                    else if (which == 7) resetSiteSession(site.id, site.url,
+                            "BASIC".equals(site.authType) || "BASIC_FORM".equals(site.authType));
                     else if (which == 8) pinSiteShortcut(site.id, site.name);
                     else if (which == 9) testSiteAccess(site.name, site.url, site.vpnRequired);
                     else if (which == 10) {
