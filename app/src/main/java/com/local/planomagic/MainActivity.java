@@ -575,8 +575,8 @@ public class MainActivity extends Activity {
 
         List<SiteProfile> customSites = loadSites();
         int appCount = 1 + customSites.size();
-        int autoCount = 1;
-        int actionCount = 0;
+        int autoCount = secrets.isConfigured() ? 1 : 0;
+        int actionCount = secrets.isConfigured() ? 0 : 1;
 
         for (SiteProfile site : customSites) {
             String type = site.authType == null ? "PENDING" : site.authType;
@@ -601,8 +601,9 @@ public class MainActivity extends Activity {
 
         TextView ready = new TextView(this);
         ready.setText(actionCount == 0
-                ? "Tout est prêt aujourd’hui !"
-                : actionCount + " action" + (actionCount > 1 ? "s" : "") + " à vérifier");
+                ? "Tes applications sont à portée de main"
+                : actionCount + " application" + (actionCount > 1 ? "s" : "")
+                        + " à configurer");
         ready.setTextSize(14);
         ready.setTextColor(secondary());
         LinearLayout.LayoutParams readyLp = new LinearLayout.LayoutParams(-1, -2);
@@ -639,7 +640,9 @@ public class MainActivity extends Activity {
             if (site.lastUsed > 0L) recentTimes.put(site.id, site.lastUsed);
         }
 
-        if (!recentTimes.isEmpty()) {
+        // With only two or three apps, the Recent section merely duplicates
+        // the whole application list and makes the dashboard harder to scan.
+        if (appCount >= 4 && !recentTimes.isEmpty()) {
             List<String> recentIds = new ArrayList<>(recentTimes.keySet());
             recentIds.sort((a,b) -> Long.compare(recentTimes.get(b), recentTimes.get(a)));
 
@@ -675,7 +678,7 @@ public class MainActivity extends Activity {
             if (site.favorite) favorites.add(site);
         }
 
-        if (planoFavorite || !favorites.isEmpty()) {
+        if (appCount >= 4 && (planoFavorite || !favorites.isEmpty())) {
             TextView favTitle = new TextView(this);
             favTitle.setText("★ Favoris");
             favTitle.setTextSize(18);
@@ -2975,8 +2978,16 @@ public class MainActivity extends Activity {
         LinearLayout stack = dialogStack();
         CheckBox bio = securityCheck("Toujours demander la biométrie",
                 "Exige une validation biométrique à chaque ouverture.", saved.requireBiometric);
-        CheckBox lock = securityCheck("Fermer la session à la sortie",
-                "Efface les cookies de ce site lorsque tu reviens à l’accueil.", saved.lockOnExit);
+        CheckBox lock = securityCheck("Nettoyage local à la sortie",
+                "Nettoie les cookies accessibles dans Wonder Apps. "
+                        + "Ne déconnecte pas nécessairement les autres services.",
+                saved.lockOnExit);
+        if (isBrowserPreferred(saved)) {
+            lock.setChecked(false);
+            lock.setEnabled(false);
+            lock.setText("Session gérée par le navigateur externe\\n"
+                    + "Déconnecte-toi depuis le site ou le navigateur.");
+        }
         CheckBox screen = securityCheck("Bloquer les captures d’écran",
                 "Option par site, désactivée par défaut.", saved.blockScreenshots);
         CheckBox vpn = securityCheck("VPN / réseau interne requis",
@@ -2986,13 +2997,16 @@ public class MainActivity extends Activity {
         stack.addView(lock);
         stack.addView(screen);
         stack.addView(vpn);
+        stack.addView(smallNote("La protection biométrique par site permet aussi "
+                + "le code PIN Wonder Apps en secours. Elle ne remplace pas "
+                + "l’authentification du site lui-même."));
 
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité • " + saved.name)
                 .setView(stack)
                 .setPositiveButton("Enregistrer", (d,w) -> {
                     saved.requireBiometric = bio.isChecked();
-                    saved.lockOnExit = lock.isChecked();
+                    saved.lockOnExit = !isBrowserPreferred(saved) && lock.isChecked();
                     saved.blockScreenshots = screen.isChecked();
                     saved.vpnRequired = vpn.isChecked();
                     saveSites(sites);
@@ -3016,8 +3030,9 @@ public class MainActivity extends Activity {
         CheckBox bio = securityCheck("Toujours demander la biométrie",
                 "Exige une validation biométrique à chaque ouverture de Plano.",
                 prefs.getBoolean(KEY_PLANO_REQUIRE_BIO, false));
-        CheckBox lock = securityCheck("Fermer la session à la sortie",
-                "Efface la session Plano lorsque tu reviens à l’accueil.",
+        CheckBox lock = securityCheck("Nettoyage local à la sortie",
+                "Nettoie les cookies accessibles de Plano ; l’accès HTTP Basic "
+                        + "peut rester en cache dans Android.",
                 prefs.getBoolean(KEY_PLANO_LOCK_EXIT, false));
         CheckBox screen = securityCheck("Bloquer les captures d’écran",
                 "Empêche captures et aperçu dans les applications récentes.",
@@ -3026,6 +3041,9 @@ public class MainActivity extends Activity {
         stack.addView(bio);
         stack.addView(lock);
         stack.addView(screen);
+        stack.addView(smallNote("La biométrie par site permet le code PIN "
+                + "Wonder Apps en secours. Le nettoyage local ne garantit pas "
+                + "la déconnexion HTTP Basic côté serveur."));
 
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité • Plano")
@@ -3830,10 +3848,11 @@ public class MainActivity extends Activity {
                         + "• Le code PIN est dérivé par PBKDF2 et n’est pas stocké en clair\n"
                         + "• Mots de passe chiffrés localement en AES-256-GCM\n"
                         + "• Clé cryptographique conservée dans Android Keystore\n"
-                        + "• Aucun mot de passe enregistré dans Chrome/Edge\n"
+                        + "• Wonder Apps ne transmet pas les mots de passe qu’il conserve aux navigateurs externes\n"
+                        + "• Edge/Chrome/Samsung peuvent conserver leurs propres sessions\n"
                         + "• Ajout de sites limité à HTTPS\n"
-                        + "• Les identifiants sont injectés uniquement sur le domaine de connexion détecté\n"
-                        + "• SSO/MFA détectés : aucune tentative de contournement\n"
+                        + "• Injection uniquement sur un hôte de connexion vérifié, jamais vers les fournisseurs Microsoft/Atlassian\n"
+                        + "• SSO/MFA : aucune tentative de contournement\n"
                         + "• Sauvegardes exportées chiffrées par mot de passe\n\n"
                         + "Les secrets sont brièvement déchiffrés en mémoire au moment d’une connexion. "
                         + "Un appareil rooté ou compromis peut réduire cette protection.")
