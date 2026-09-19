@@ -1743,8 +1743,7 @@ public class MainActivity extends Activity {
         if (offerKnownWonderViewAddressFix(site)) return;
         if (waitingVpnSiteId != null) {
             // Any manual tap supersedes the previously queued VPN handoff.
-            waitingVpnSiteId = null;
-            waitingVpnStartedAt = 0L;
+            clearPendingVpnSite();
         }
         if (hasInvalidProviderEntryPoint(site)) {
             explainEntryPoint(site);
@@ -1995,7 +1994,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Ouvrir FortiClient VPN",
                         (d,w) -> launchFortiClientForSite(site))
                 .setNeutralButton("Déjà sur le réseau interne", (d,w) -> {
-                    waitingVpnSiteId = null;
+                    clearPendingVpnSite();
                     if (isInternalHttp(site)) {
                         if (!launchExternalSite(site, null)) {
                             Toast.makeText(this, "Navigateur indisponible",
@@ -2007,7 +2006,7 @@ public class MainActivity extends Activity {
                         openCustomNow(site);
                     }
                 })
-                .setNegativeButton("Annuler", (d,w) -> waitingVpnSiteId = null)
+                .setNegativeButton("Annuler", (d,w) -> clearPendingVpnSite())
                 .show();
     }
 
@@ -2016,14 +2015,12 @@ public class MainActivity extends Activity {
                 || isFinishing()) return;
         if (waitingVpnStartedAt <= 0L
                 || System.currentTimeMillis() - waitingVpnStartedAt > 10 * 60 * 1000L) {
-            waitingVpnSiteId = null;
-            waitingVpnStartedAt = 0L;
+            clearPendingVpnSite();
             status("Connexion VPN à relancer");
             return;
         }
         String siteId = waitingVpnSiteId;
-        waitingVpnSiteId = null; // Never reopen after another return from browser.
-        waitingVpnStartedAt = 0L;
+        clearPendingVpnSite(); // Never reopen after another return from browser.
         SiteProfile site = findById(loadSites(), siteId);
         if (site == null || !requiresVpn(site)) return;
 
@@ -3600,7 +3597,7 @@ public class MainActivity extends Activity {
                     saved.vpnRequired = isInternalHttp(saved) || vpn.isChecked();
                     saved.resumeAfterVpn = resumeVpn.isChecked();
                     if (!saved.vpnRequired && saved.id.equals(waitingVpnSiteId)) {
-                        waitingVpnSiteId = null;
+                        clearPendingVpnSite();
                     }
                     saveSites(sites);
                     if (activeSite != null && saved.id.equals(activeSite.id)) {
