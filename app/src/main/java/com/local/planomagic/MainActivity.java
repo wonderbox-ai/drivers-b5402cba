@@ -136,8 +136,9 @@ public class MainActivity extends Activity {
             s.authType = o.optString("authType", "PENDING");
             s.loginHost = o.optString("loginHost", "");
             String opening = o.optString("openingMode", "AUTO");
-            s.openingMode = ("IN_APP".equals(opening) || "BROWSER".equals(opening))
-                    ? opening : "AUTO";
+            s.openingMode = ("IN_APP".equals(opening) || "BROWSER".equals(opening)
+                    || "EDGE".equals(opening) || "CHROME".equals(opening)
+                    || "SAMSUNG".equals(opening)) ? opening : "AUTO";
             s.favorite = o.optBoolean("favorite", false);
             s.requireBiometric = o.optBoolean("requireBiometric", false);
             s.lockOnExit = o.optBoolean("lockOnExit", false);
@@ -1542,8 +1543,11 @@ public class MainActivity extends Activity {
 
     private boolean isBrowserPreferred(SiteProfile site) {
         if (site == null) return false;
-        if ("BROWSER".equals(site.openingMode)) return true;
         if ("IN_APP".equals(site.openingMode)) return false;
+        if ("BROWSER".equals(site.openingMode)
+                || "EDGE".equals(site.openingMode)
+                || "CHROME".equals(site.openingMode)
+                || "SAMSUNG".equals(site.openingMode)) return true;
         // Atlassian Cloud may first display its own form before redirecting to
         // the organization's Microsoft SSO. Do not inject saved passwords there.
         return isAtlassianCloudSite(site)
