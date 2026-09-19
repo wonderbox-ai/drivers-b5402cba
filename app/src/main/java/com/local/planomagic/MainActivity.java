@@ -970,6 +970,7 @@ public class MainActivity extends Activity {
     private String siteStateLabel(SiteProfile site) {
         if (site == null) return "Configuration à vérifier";
         String type = site.authType == null ? "PENDING" : site.authType;
+        if (isInternalHttp(site)) return "Site interne • VPN requis";
         if (isBrowserPreferred(site)) return "Connexion via navigateur";
         if ("SSO".equals(type)) return "Connexion professionnelle";
         if ("MFA".equals(type)) return "Validation de connexion nécessaire";
@@ -1219,6 +1220,17 @@ public class MainActivity extends Activity {
     }
 
     private void analyzeSite(SiteProfile site) {
+        if (isInternalHttp(site)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Site interne HTTP")
+                    .setMessage("Ce site reste dans ton navigateur via VPN. "
+                            + "Wonder Apps n’analyse pas son formulaire et ne "
+                            + "stocke pas de mot de passe pour une adresse HTTP.")
+                    .setPositiveButton("Ouvrir", (d,w) -> openCustom(site))
+                    .setNegativeButton("Fermer", null)
+                    .show();
+            return;
+        }
         // Analyzing Jira must never log the user out of Plano or other sites.
         clearTransientState();
         web.stopLoading();
@@ -1556,6 +1568,7 @@ public class MainActivity extends Activity {
 
     private boolean isBrowserPreferred(SiteProfile site) {
         if (site == null) return false;
+        if (isInternalHttp(site)) return true; // Even when old settings claim IN_APP.
         String host = site.url == null ? null : Uri.parse(site.url).getHost();
         return SiteRoutingPolicy.useExternalBrowser(host, site.authType, site.openingMode);
     }
@@ -1563,7 +1576,9 @@ public class MainActivity extends Activity {
     private boolean hasInvalidProviderEntryPoint(SiteProfile site) {
         if (site == null) return true;
         Uri uri = Uri.parse(site.url == null ? "" : site.url);
-        return !"https".equalsIgnoreCase(uri.getScheme())
+        return (!"https".equalsIgnoreCase(uri.getScheme())
+                    && !SiteRoutingPolicy.isAllowedInternalHttp(
+                            uri.getScheme(), uri.getHost()))
                 || uri.getHost() == null
                 || isProviderEntryHost(uri.getHost());
     }
@@ -1589,7 +1604,9 @@ public class MainActivity extends Activity {
         }
 
         Runnable open = () -> {
-            if ("PENDING".equals(site.authType) || "UNKNOWN".equals(site.authType)) {
+            if (isInternalHttp(site)) {
+                openBrowserForSite(site);
+            } else if ("PENDING".equals(site.authType) || "UNKNOWN".equals(site.authType)) {
                 if (isBrowserPreferred(site)) openBrowserForSite(site);
                 else analyzeSite(site);
             } else if (isBrowserPreferred(site)) {
