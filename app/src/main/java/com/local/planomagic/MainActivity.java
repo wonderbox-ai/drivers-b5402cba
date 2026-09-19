@@ -594,15 +594,19 @@ public class MainActivity extends Activity {
 
         for (SiteProfile site : customSites) {
             String type = site.authType == null ? "PENDING" : site.authType;
-            boolean auto = ("FORM".equals(type) || "BASIC".equals(type))
+            boolean twoStep = "BASIC_FORM".equals(type);
+            boolean auto = site.autoConnect
+                    && ("FORM".equals(type) || "BASIC".equals(type) || twoStep)
                     && !site.username.isEmpty()
-                    && !site.password.isEmpty();
+                    && !site.password.isEmpty()
+                    && (!twoStep || (!site.basicUsername.isEmpty()
+                            && !site.basicPassword.isEmpty()));
             if (auto && !isBrowserPreferred(site)) autoCount++;
 
-            if (!isBrowserPreferred(site)
+            if (!isBrowserPreferred(site) && site.autoConnect
                     && ("PENDING".equals(type) || "UNKNOWN".equals(type)
-                    || (("FORM".equals(type) || "BASIC".equals(type))
-                    && (site.username.isEmpty() || site.password.isEmpty())))) {
+                    || (("FORM".equals(type) || "BASIC".equals(type)
+                         || "BASIC_FORM".equals(type)) && !auto))) {
                 actionCount++;
             }
         }
@@ -986,17 +990,22 @@ public class MainActivity extends Activity {
         String type = site.authType == null ? "PENDING" : site.authType;
         if (isInternalHttp(site)) return "Site interne • VPN requis";
         if (isBrowserPreferred(site)) return "Connexion via navigateur";
+        if (!site.autoConnect) return "Ouverture manuelle";
         if ("SSO".equals(type)) return "Connexion professionnelle";
         if ("MFA".equals(type)) return "Validation de connexion nécessaire";
+        if ("BASIC_FORM".equals(type)) {
+            return (!site.basicUsername.isEmpty() && !site.basicPassword.isEmpty()
+                    && !site.username.isEmpty() && !site.password.isEmpty())
+                    ? "Connexion en 2 étapes configurée"
+                    : "Connexion en 2 étapes à configurer";
+        }
         if ("PENDING".equals(type) || "UNKNOWN".equals(type)) return "Configuration à vérifier";
         if (("FORM".equals(type) || "BASIC".equals(type))
                 && (site.username.isEmpty() || site.password.isEmpty())) {
             return "Identifiants à configurer";
         }
-        if ("BASIC_FORM".equals(type)) return dualConfigured(site)
-                ? "Connexion en 2 étapes configurée" : "Connexion en 2 étapes à configurer";
         if ("FORM".equals(type) || "BASIC".equals(type)) return "Connexion auto configurée";
-        return "Page accessible"; // Never equate loading a page with being authenticated.
+        return "Page accessible";
     }
 
     private String authShort(String type) {
@@ -1015,7 +1024,7 @@ public class MainActivity extends Activity {
         switch (type) {
             case "FORM": return "formulaire détecté";
             case "BASIC": return "HTTP Basic détecté";
-            case "BASIC_FORM": return "Deux étapes : HTTP Basic puis formulaire AD";
+            case "BASIC_FORM": return "Deux étapes : HTTP Basic puis formulaire professionnel";
             case "SSO": return "SSO détecté";
             case "MFA": return "MFA détecté";
             case "NONE": return "aucune connexion détectée";
@@ -1025,8 +1034,8 @@ public class MainActivity extends Activity {
     }
 
     private int authColor(String type) {
-        if ("FORM".equals(type) || "BASIC".equals(type) || "BASIC_FORM".equals(type))
-            return Color.rgb(45,160,90);
+        if ("FORM".equals(type) || "BASIC".equals(type)
+                || "BASIC_FORM".equals(type)) return Color.rgb(45,160,90);
         if ("SSO".equals(type) || "MFA".equals(type)) return Color.rgb(220,150,35);
         if ("UNKNOWN".equals(type)) return Color.rgb(210,80,70);
         return accent();
