@@ -37,6 +37,14 @@ public class MainActivity extends Activity {
     private static final int REQ_EXPORT_BACKUP = 5101;
     private static final int REQ_IMPORT_BACKUP = 5102;
     private static final int REQ_PICK_LOGO = 5103;
+    private static final int REQ_PICK_SITE_LOGO = 5104;
+    private static final String SITE_PLANO_ID = "__plano__";
+    private static final String KEY_APP_ORDER = "app_order_v1";
+    private static final String KEY_PLANO_FAVORITE = "plano_favorite";
+    private static final String KEY_PLANO_REQUIRE_BIO = "plano_require_biometric";
+    private static final String KEY_PLANO_LOCK_EXIT = "plano_lock_on_exit";
+    private static final String KEY_PLANO_BLOCK_SCREEN = "plano_block_screenshots";
+    private static final String KEY_AUTO_LOCK_SECONDS = "auto_lock_seconds";
 
     private final Handler timer = new Handler(Looper.getMainLooper());
 
@@ -55,6 +63,9 @@ public class MainActivity extends Activity {
     private int pinAttempts = 0;
     private String pendingBackupPassword;
     private boolean importFromOnboarding = false;
+    private String pendingSiteLogoId;
+    private String pendingShortcutSiteId;
+    private long backgroundAt = 0L;
     private CancellationSignal biometricCancellation;
     private boolean onHome = true;
     private boolean analysisMode = false;
@@ -74,6 +85,13 @@ public class MainActivity extends Activity {
         String password = "";
         String authType = "PENDING";
         String loginHost = "";
+        boolean favorite = false;
+        boolean requireBiometric = false;
+        boolean lockOnExit = false;
+        boolean blockScreenshots = false;
+        boolean vpnRequired = false;
+        String category = "";
+        long lastUsed = 0L;
 
         JSONObject toJson() throws Exception {
             JSONObject o = new JSONObject();
@@ -84,6 +102,13 @@ public class MainActivity extends Activity {
             o.put("password", password);
             o.put("authType", authType);
             o.put("loginHost", loginHost);
+            o.put("favorite", favorite);
+            o.put("requireBiometric", requireBiometric);
+            o.put("lockOnExit", lockOnExit);
+            o.put("blockScreenshots", blockScreenshots);
+            o.put("vpnRequired", vpnRequired);
+            o.put("category", category);
+            o.put("lastUsed", lastUsed);
             return o;
         }
 
@@ -96,6 +121,13 @@ public class MainActivity extends Activity {
             s.password = o.optString("password", "");
             s.authType = o.optString("authType", "PENDING");
             s.loginHost = o.optString("loginHost", "");
+            s.favorite = o.optBoolean("favorite", false);
+            s.requireBiometric = o.optBoolean("requireBiometric", false);
+            s.lockOnExit = o.optBoolean("lockOnExit", false);
+            s.blockScreenshots = o.optBoolean("blockScreenshots", false);
+            s.vpnRequired = o.optBoolean("vpnRequired", false);
+            s.category = o.optString("category", "");
+            s.lastUsed = o.optLong("lastUsed", 0L);
             if (o.has("autoLogin") && "PENDING".equals(s.authType) && o.optBoolean("autoLogin", false)) {
                 s.authType = "FORM";
             }
@@ -119,6 +151,8 @@ public class MainActivity extends Activity {
         configureWebView();
         updateSystemBars();
 
+        pendingShortcutSiteId = getIntent() == null ? null : getIntent().getStringExtra("shortcut_site_id");
+
         boolean onboarded = settings.getBoolean(KEY_ONBOARDED, false);
 
         // Migration douce depuis les versions précédentes : si des identifiants existent déjà,
@@ -137,6 +171,14 @@ public class MainActivity extends Activity {
             root.setVisibility(View.INVISIBLE);
             requestUnlock();
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        pendingShortcutSiteId = intent == null ? null : intent.getStringExtra("shortcut_site_id");
+        if (unlocked) handlePendingShortcut();
     }
 
     private void requestUnlock() {
@@ -290,6 +332,7 @@ public class MainActivity extends Activity {
         unlockFallbackStarted = false;
         root.setVisibility(View.VISIBLE);
         showHome("Déverrouillé");
+        handlePendingShortcut();
     }
 
     private void updateSystemBars() {
