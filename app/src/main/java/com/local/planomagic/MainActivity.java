@@ -1464,8 +1464,8 @@ public class MainActivity extends Activity {
                 v -> confirmResetSession()));
 
         stack.addView(settingsRow(
-                "Apparence et logo",
-                "Mode classique / sombre et logo affiché dans Wonder Apps",
+                "Apparence",
+                "Mode classique / sombre",
                 v -> showAppearance()));
 
         stack.addView(settingsRow(
@@ -1682,23 +1682,10 @@ public class MainActivity extends Activity {
         else classic.setChecked(true);
 
         content.addView(group);
-        content.addView(settingsRow(
-                "Choisir le logo affiché",
-                "Utiliser une image de ton téléphone dans l’en-tête de Wonder Apps",
-                v -> chooseAppLogo()));
-        content.addView(settingsRow(
-                "Restaurer le logo par défaut",
-                "Revenir à l’image actuellement fournie avec l’application",
-                v -> resetAppLogo()));
-        content.addView(settingsRow(
-                "Créer un raccourci avec ce logo",
-                "Ajoute sur l’écran d’accueil un raccourci Wonder Apps utilisant le logo choisi",
-                v -> pinCustomHomeShortcut()));
-        content.addView(smallNote("Android ne permet pas à une application de remplacer librement son icône système par n’importe quelle photo. Le raccourci personnalisé contourne proprement cette limite : tu peux ensuite retirer l’ancien raccourci de l’écran d’accueil."));
-        content.addView(smallNote("Le changement de thème modifie l’interface de Wonder Apps sans fermer le site ouvert. Le contenu du site lui-même garde son propre thème."));
+        content.addView(smallNote("Les logos sont désormais personnalisables directement depuis chaque application. Le changement de thème ne ferme pas le site actuellement ouvert."));
 
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Apparence et logo")
+                .setTitle("Apparence")
                 .setView(content)
                 .setPositiveButton("Appliquer le thème", null)
                 .setNegativeButton("Fermer", null)
