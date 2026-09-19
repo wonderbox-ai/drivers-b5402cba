@@ -4,6 +4,8 @@ import android.app.*;
 import android.content.SharedPreferences;
 import android.content.Intent;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.*;
@@ -17,6 +19,7 @@ import org.json.JSONObject;
 import java.util.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import android.util.Base64;
 
 public class MainActivity extends Activity {
     private static final String PLANO_HOST = "plano.wonderbox.com";
@@ -28,6 +31,7 @@ public class MainActivity extends Activity {
     private static final String KEY_ONBOARDED = "onboarding_complete";
     private static final int REQ_EXPORT_BACKUP = 5101;
     private static final int REQ_IMPORT_BACKUP = 5102;
+    private static final int REQ_PICK_LOGO = 5103;
 
     private final Handler timer = new Handler(Looper.getMainLooper());
 
@@ -388,7 +392,7 @@ public class MainActivity extends Activity {
         topBar.setBackgroundColor(surface());
 
         avatar = new ImageView(this);
-        avatar.setImageResource(R.drawable.app_icon_photo);
+        loadAppLogo();
         avatar.setScaleType(ImageView.ScaleType.CENTER_CROP);
         LinearLayout.LayoutParams avatarLp = new LinearLayout.LayoutParams(dp(40), dp(40));
         avatarLp.setMargins(0, 0, dp(10), 0);
@@ -1092,30 +1096,158 @@ public class MainActivity extends Activity {
         refreshButton.setVisibility(View.VISIBLE);
     }
 
+    private LinearLayout dialogStack() {
+        LinearLayout stack = new LinearLayout(this);
+        stack.setOrientation(LinearLayout.VERTICAL);
+        stack.setPadding(dp(8), dp(4), dp(8), dp(4));
+        return stack;
+    }
+
+    private LinearLayout settingsRow(String title, String subtitle, View.OnClickListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(16), dp(12), dp(16), dp(12));
+        row.setBackground(round(surface2(), 14, border()));
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setOnClickListener(listener);
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(0, dp(5), 0, dp(5));
+        row.setLayoutParams(lp);
+
+        TextView t = new TextView(this);
+        t.setText(title);
+        t.setTextSize(17);
+        t.setTextColor(primary());
+        row.addView(t);
+
+        if (subtitle != null && !subtitle.isEmpty()) {
+            TextView s = new TextView(this);
+            s.setText(subtitle);
+            s.setTextSize(12.5f);
+            s.setTextColor(secondary());
+            LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, -2);
+            slp.setMargins(0, dp(3), 0, 0);
+            s.setLayoutParams(slp);
+            row.addView(s);
+        }
+
+        return row;
+    }
+
+    private TextView smallNote(String text) {
+        TextView note = new TextView(this);
+        note.setText(text);
+        note.setTextSize(12.5f);
+        note.setTextColor(secondary());
+        note.setPadding(dp(8), dp(8), dp(8), dp(6));
+        return note;
+    }
+
+    private File customLogoFile() {
+        return new File(getFilesDir(), "wonder_apps_custom_logo.png");
+    }
+
+    private void loadAppLogo() {
+        if (avatar == null) return;
+
+        File file = customLogoFile();
+        if (file.exists()) {
+            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
+            if (bitmap != null) {
+                avatar.setImageBitmap(bitmap);
+                return;
+            }
+        }
+        avatar.setImageResource(R.drawable.app_icon_photo);
+    }
+
+    private void chooseAppLogo() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        startActivityForResult(intent, REQ_PICK_LOGO);
+    }
+
+    private void savePickedLogo(Uri uri) {
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            if (in == null) throw new IOException("Image inaccessible");
+
+            Bitmap bitmap = BitmapFactory.decodeStream(in);
+            if (bitmap == null) throw new IOException("Image invalide");
+
+            int max = 1024;
+            if (bitmap.getWidth() > max || bitmap.getHeight() > max) {
+                float ratio = Math.min((float) max / bitmap.getWidth(), (float) max / bitmap.getHeight());
+                int w = Math.max(1, Math.round(bitmap.getWidth() * ratio));
+                int h = Math.max(1, Math.round(bitmap.getHeight() * ratio));
+                bitmap = Bitmap.createScaledBitmap(bitmap, w, h, true);
+            }
+
+            try (OutputStream out = new FileOutputStream(customLogoFile())) {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 92, out);
+            }
+
+            loadAppLogo();
+            Toast.makeText(this, "Logo mis à jour", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Logo non modifié")
+                    .setMessage("L’image n’a pas pu être utilisée. Choisis une image PNG, JPG ou WEBP classique.")
+                    .setPositiveButton("OK", null)
+                    .show();
+        }
+    }
+
+    private void resetAppLogo() {
+        File file = customLogoFile();
+        if (file.exists()) file.delete();
+        loadAppLogo();
+        Toast.makeText(this, "Logo par défaut restauré", Toast.LENGTH_SHORT).show();
+    }
+
     private void showSettingsCenter() {
-        String[] items = {
+        LinearLayout stack = dialogStack();
+
+        stack.addView(settingsRow(
                 "Sécurité et déverrouillage",
+                "Biométrie, code PIN et informations de sécurité",
+                v -> showUnlockSettings()));
+
+        stack.addView(settingsRow(
                 "Mot de passe AD (session Windows)",
+                "Mettre à jour le mot de passe mémorisé après un changement AD",
+                v -> showAdPasswordInfo()));
+
+        stack.addView(settingsRow(
                 "Réinitialiser la session navigateur",
-                "Apparence",
+                "Effacer cookies et session Web sans supprimer tes identifiants",
+                v -> confirmResetSession()));
+
+        stack.addView(settingsRow(
+                "Apparence et logo",
+                "Mode classique / sombre et logo affiché dans Wonder Apps",
+                v -> showAppearance()));
+
+        stack.addView(settingsRow(
                 "Sites",
+                "Ajouter, modifier ou ré-analyser les applications enregistrées",
+                v -> showSitesSettings()));
+
+        stack.addView(settingsRow(
                 "Sauvegarde / restauration",
-                "À propos"
-        };
+                "Exporter ou réimporter une sauvegarde chiffrée",
+                v -> showBackupMenu()));
+
+        stack.addView(settingsRow(
+                "À propos",
+                "Version, auteur et objectif de l’application",
+                v -> showAbout()));
 
         new AlertDialog.Builder(this)
                 .setTitle("Réglages")
-                .setItems(items, (d, which) -> {
-                    switch (which) {
-                        case 0: showUnlockSettings(); break;
-                        case 1: showAdPasswordInfo(); break;
-                        case 2: confirmResetSession(); break;
-                        case 3: showAppearance(); break;
-                        case 4: showSitesSettings(); break;
-                        case 5: showBackupMenu(); break;
-                        default: showAbout(); break;
-                    }
-                })
+                .setView(stack)
                 .setNegativeButton("Fermer", null)
                 .show();
     }
@@ -1126,57 +1258,93 @@ public class MainActivity extends Activity {
                 ? "Biométrie + code PIN de secours"
                 : (PinManager.MODE_PIN.equals(mode) ? "Code PIN" : "Désactivé");
 
-        String[] items = {
-                "Méthode de déverrouillage\nActuel : " + current,
+        LinearLayout stack = dialogStack();
+
+        stack.addView(settingsRow(
+                "Méthode de déverrouillage",
+                "Actuel : " + current,
+                v -> chooseUnlockMethod(false, null)));
+
+        stack.addView(settingsRow(
                 "Modifier le code PIN",
-                "Informations de sécurité"
-        };
+                "Changer le code PIN Wonder Apps",
+                v -> showPinSetup(() ->
+                        Toast.makeText(this, "Code PIN mis à jour", Toast.LENGTH_SHORT).show())));
+
+        stack.addView(settingsRow(
+                "Informations de sécurité",
+                "Comprendre comment tes données sont protégées",
+                v -> showSecurity()));
 
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité et déverrouillage")
-                .setItems(items, (d, which) -> {
-                    if (which == 0) chooseUnlockMethod(false, null);
-                    else if (which == 1) showPinSetup(() ->
-                            Toast.makeText(this, "Code PIN mis à jour", Toast.LENGTH_SHORT).show());
-                    else showSecurity();
-                })
+                .setView(stack)
                 .setNegativeButton("Retour", null)
                 .show();
     }
 
     private void chooseUnlockMethod(boolean onboarding, Runnable after) {
-        String[] choices = {
-                "Biométrie + code PIN de secours",
-                "Code PIN",
-                "Désactivé"
-        };
-
         String current = pinManager.getMode();
-        int checked = PinManager.MODE_PIN.equals(current) ? 1
-                : (PinManager.MODE_DISABLED.equals(current) ? 2 : 0);
+
+        LinearLayout content = dialogStack();
+        content.addView(smallNote("Choisis comment protéger l’ouverture de Wonder Apps. Avec la biométrie, le code PIN reste toujours disponible en secours."));
+
+        RadioGroup group = new RadioGroup(this);
+        group.setOrientation(RadioGroup.VERTICAL);
+        group.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+        RadioButton biometric = new RadioButton(this);
+        biometric.setText("Biométrie + code PIN de secours");
+        biometric.setTextSize(15);
+        biometric.setTextColor(primary());
+        biometric.setTag(PinManager.MODE_BIOMETRIC);
+
+        RadioButton pin = new RadioButton(this);
+        pin.setText("Code PIN");
+        pin.setTextSize(15);
+        pin.setTextColor(primary());
+        pin.setTag(PinManager.MODE_PIN);
+
+        RadioButton disabled = new RadioButton(this);
+        disabled.setText("Désactivé");
+        disabled.setTextSize(15);
+        disabled.setTextColor(primary());
+        disabled.setTag(PinManager.MODE_DISABLED);
+
+        group.addView(biometric);
+        group.addView(pin);
+        group.addView(disabled);
+
+        if (PinManager.MODE_PIN.equals(current)) pin.setChecked(true);
+        else if (PinManager.MODE_DISABLED.equals(current)) disabled.setChecked(true);
+        else biometric.setChecked(true);
+
+        content.addView(group);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Méthode de déverrouillage")
-                .setMessage("La biométrie utilise toujours le code PIN Wonder Apps comme solution de secours.")
-                .setSingleChoiceItems(choices, checked, null)
-                .setPositiveButton("Continuer", null)
+                .setView(content)
+                .setPositiveButton("Enregistrer", null)
                 .setNegativeButton(onboarding ? null : "Annuler", null)
                 .create();
 
         dialog.setCancelable(!onboarding);
         dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            int selected = dialog.getListView().getCheckedItemPosition();
+            RadioButton selected = content.findViewById(group.getCheckedRadioButtonId());
+            if (selected == null) {
+                Toast.makeText(this, "Choisis une méthode", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            String selectedMode = String.valueOf(selected.getTag());
 
             Runnable saveAndContinue = () -> {
-                if (selected == 0) pinManager.setMode(PinManager.MODE_BIOMETRIC);
-                else if (selected == 1) pinManager.setMode(PinManager.MODE_PIN);
-                else pinManager.setMode(PinManager.MODE_DISABLED);
-
+                pinManager.setMode(selectedMode);
                 dialog.dismiss();
                 if (after != null) after.run();
             };
 
-            if (selected == 2) {
+            if (PinManager.MODE_DISABLED.equals(selectedMode)) {
                 saveAndContinue.run();
             } else if (!pinManager.hasPin()) {
                 showPinSetup(saveAndContinue);
@@ -1211,42 +1379,89 @@ public class MainActivity extends Activity {
 
     private void showSitesSettings() {
         List<SiteProfile> sites = loadSites();
-        List<String> labels = new ArrayList<>();
-        labels.add("+ Ajouter un site");
-        labels.add("Plano • Identifiants");
+        LinearLayout stack = dialogStack();
+
+        stack.addView(settingsRow(
+                "+ Ajouter un site",
+                "Wonder Apps analysera automatiquement sa méthode de connexion",
+                v -> editSiteAddress(null)));
+
+        stack.addView(settingsRow(
+                "Plano",
+                "Application configurée en connexion automatique",
+                v -> editPlanoCredentials(false)));
 
         for (SiteProfile site : sites) {
-            labels.add(site.name + " • " + authLabel(site.authType));
+            final SiteProfile current = site;
+            stack.addView(settingsRow(
+                    site.name,
+                    authLabel(site.authType),
+                    v -> showSiteActions(current)));
         }
 
         new AlertDialog.Builder(this)
                 .setTitle("Sites")
-                .setItems(labels.toArray(new String[0]), (d, which) -> {
-                    if (which == 0) editSiteAddress(null);
-                    else if (which == 1) editPlanoCredentials(false);
-                    else showSiteActions(sites.get(which - 2));
-                })
+                .setView(stack)
                 .setNegativeButton("Retour", null)
                 .show();
     }
 
     private void showAppearance() {
-        String[] choices = {"Classique", "Sombre"};
-        int checked = darkMode ? 1 : 0;
+        LinearLayout content = dialogStack();
+
+        TextView themeTitle = new TextView(this);
+        themeTitle.setText("Thème");
+        themeTitle.setTextSize(15);
+        themeTitle.setTextColor(primary());
+        themeTitle.setPadding(dp(8), dp(4), dp(8), dp(2));
+        content.addView(themeTitle);
+
+        RadioGroup group = new RadioGroup(this);
+        group.setOrientation(RadioGroup.VERTICAL);
+        group.setPadding(dp(8), 0, dp(8), dp(8));
+
+        RadioButton classic = new RadioButton(this);
+        classic.setText("Classique");
+        classic.setTextSize(15);
+        classic.setTextColor(primary());
+        classic.setTag("light");
+
+        RadioButton dark = new RadioButton(this);
+        dark.setText("Sombre");
+        dark.setTextSize(15);
+        dark.setTextColor(primary());
+        dark.setTag("dark");
+
+        group.addView(classic);
+        group.addView(dark);
+
+        if (darkMode) dark.setChecked(true);
+        else classic.setChecked(true);
+
+        content.addView(group);
+        content.addView(settingsRow(
+                "Choisir le logo affiché",
+                "Utiliser une image de ton téléphone dans l’en-tête de Wonder Apps",
+                v -> chooseAppLogo()));
+        content.addView(settingsRow(
+                "Restaurer le logo par défaut",
+                "Revenir à l’image actuellement fournie avec l’application",
+                v -> resetAppLogo()));
+        content.addView(smallNote("Le changement de thème modifie l’interface de Wonder Apps sans fermer le site ouvert. Le contenu du site lui-même garde son propre thème."));
 
         AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Apparence")
-                .setMessage("Le changement s’applique sans fermer le site actuellement ouvert.")
-                .setSingleChoiceItems(choices, checked, null)
-                .setPositiveButton("Appliquer", null)
-                .setNegativeButton("Annuler", null)
+                .setTitle("Apparence et logo")
+                .setView(content)
+                .setPositiveButton("Appliquer le thème", null)
+                .setNegativeButton("Fermer", null)
                 .create();
 
         d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            int selected = d.getListView().getCheckedItemPosition();
-            boolean nextDark = selected == 1;
-            d.dismiss();
+            RadioButton selected = content.findViewById(group.getCheckedRadioButtonId());
+            if (selected == null) return;
+            boolean nextDark = "dark".equals(String.valueOf(selected.getTag()));
             applyThemeWithoutRestart(nextDark);
+            d.dismiss();
         }));
         d.show();
     }
@@ -1621,20 +1836,24 @@ public class MainActivity extends Activity {
     }
 
     private void showBackupMenu() {
-        String[] items = {
+        LinearLayout stack = dialogStack();
+        stack.addView(smallNote(
+                "La sauvegarde contient tes sites, leurs réglages, le thème, le logo personnalisé et les identifiants enregistrés. "
+                        + "Le fichier est chiffré avec un mot de passe que toi seul connais. Le code PIN Wonder Apps n’est jamais exporté."));
+
+        stack.addView(settingsRow(
                 "Exporter une sauvegarde",
-                "Importer une sauvegarde"
-        };
+                "Créer un fichier .wonderbackup chiffré pour un autre téléphone",
+                v -> startExport()));
+
+        stack.addView(settingsRow(
+                "Importer une sauvegarde",
+                "Restaurer un fichier .wonderbackup existant",
+                v -> startImport(false)));
 
         new AlertDialog.Builder(this)
                 .setTitle("Sauvegarde / restauration")
-                .setMessage("La sauvegarde contient tes sites, leurs réglages et les identifiants enregistrés. "
-                        + "Elle est chiffrée avec un mot de passe d’export que toi seul connais.\n\n"
-                        + "Le code PIN de Wonder Apps n’est jamais exporté : il devra être recréé sur un nouveau téléphone.")
-                .setItems(items, (d, which) -> {
-                    if (which == 0) startExport();
-                    else startImport(false);
-                })
+                .setView(stack)
                 .setNegativeButton("Retour", null)
                 .show();
     }
@@ -1698,6 +1917,18 @@ public class MainActivity extends Activity {
         if (sites.isEmpty()) sites = secrets.get("custom_sites_v1");
         payload.put("sites", sites.isEmpty() ? "[]" : sites);
         payload.put("darkMode", darkMode);
+
+        File logo = customLogoFile();
+        if (logo.exists()) {
+            try (InputStream in = new FileInputStream(logo);
+                 ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[8192];
+                int read;
+                while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
+                payload.put("customLogo", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
+            }
+        }
+
         return payload;
     }
 
@@ -1785,6 +2016,19 @@ public class MainActivity extends Activity {
         secrets.put(CredentialStore.AD_PASS, payload.optString("adPass", ""));
         secrets.put(CUSTOM_SITES, payload.optString("sites", "[]"));
 
+        String logoB64 = payload.optString("customLogo", "");
+        if (!logoB64.isEmpty()) {
+            byte[] bytes = Base64.decode(logoB64, Base64.NO_WRAP);
+            try (OutputStream out = new FileOutputStream(customLogoFile())) {
+                out.write(bytes);
+            }
+            loadAppLogo();
+        } else {
+            File logo = customLogoFile();
+            if (logo.exists()) logo.delete();
+            loadAppLogo();
+        }
+
         boolean importedDark = payload.optBoolean("darkMode", false);
         applyThemeWithoutRestart(importedDark);
         clearWebSession();
@@ -1812,6 +2056,8 @@ public class MainActivity extends Activity {
             boolean fromOnboarding = importFromOnboarding;
             importFromOnboarding = false;
             promptImportPassword(uri, fromOnboarding);
+        } else if (requestCode == REQ_PICK_LOGO) {
+            savePickedLogo(uri);
         }
     }
 
@@ -1823,7 +2069,6 @@ public class MainActivity extends Activity {
                         + "• Mots de passe chiffrés localement en AES-256-GCM\n"
                         + "• Clé cryptographique conservée dans Android Keystore\n"
                         + "• Aucun mot de passe enregistré dans Chrome/Edge\n"
-                        + "• Aucun mot de passe envoyé sur GitHub\n"
                         + "• Ajout de sites limité à HTTPS\n"
                         + "• Les identifiants sont injectés uniquement sur le domaine de connexion détecté\n"
                         + "• SSO/MFA détectés : aucune tentative de contournement\n"
