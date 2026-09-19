@@ -623,7 +623,7 @@ public class MainActivity extends Activity {
         stats.setWeightSum(3f);
 
         stats.addView(statTile(String.valueOf(appCount), "Applications"));
-        stats.addView(statTile(String.valueOf(autoCount), "Connexions auto"));
+        stats.addView(statTile(String.valueOf(autoCount), "Auto configurées"));
         stats.addView(statTile(String.valueOf(actionCount), "À vérifier"));
 
         LinearLayout.LayoutParams statsLp = new LinearLayout.LayoutParams(-1, -2);
@@ -978,7 +978,7 @@ public class MainActivity extends Activity {
                 && (site.username.isEmpty() || site.password.isEmpty())) {
             return "Identifiants à configurer";
         }
-        if ("FORM".equals(type) || "BASIC".equals(type)) return "Connexion automatique disponible";
+        if ("FORM".equals(type) || "BASIC".equals(type)) return "Connexion auto configurée";
         return "Page accessible"; // Never equate loading a page with being authenticated.
     }
 
@@ -1286,12 +1286,14 @@ public class MainActivity extends Activity {
                 if (otp > 0) {
                     site.loginHost = "";
                     finishAnalysis(site, "MFA");
+                } else if (sso) {
+                    // Be conservative: an identity-provider option on a login
+                    // form must not be mistaken for proven password auto-login.
+                    site.loginHost = "";
+                    finishAnalysis(site, "SSO");
                 } else if (passwords > 0) {
                     site.loginHost = host == null ? "" : host;
                     finishAnalysis(site, "FORM");
-                } else if (sso) {
-                    site.loginHost = "";
-                    finishAnalysis(site, "SSO");
                 } else {
                     analysisPass++;
                     if (analysisPass >= 2) {
@@ -1339,14 +1341,16 @@ public class MainActivity extends Activity {
                 title = "HTTP Basic détecté";
                 message = "Le site demande une authentification native"
                         + (saved.loginHost.isEmpty() ? "" : " sur " + saved.loginHost)
-                        + ". Wonder Apps peut la remplir automatiquement.";
+                        + ". Wonder Apps peut proposer tes identifiants sur cet hôte. "
+                        + "La réussite devra être confirmée.";
                 credsUseful = true;
                 break;
             case "FORM":
                 title = "Formulaire détecté";
                 message = "Un formulaire identifiant / mot de passe a été détecté"
                         + (saved.loginHost.isEmpty() ? "" : " sur " + saved.loginHost)
-                        + ". La connexion automatique est compatible.";
+                        + ". Une automatisation peut être configurée, mais sa réussite "
+                        + "reste à confirmer sur le site réel.";
                 credsUseful = true;
                 break;
             case "SSO":
@@ -2799,7 +2803,7 @@ public class MainActivity extends Activity {
                     if (which == 0) openCustom(site);
                     else if (which == 1) editSiteAddress(site);
                     else if (which == 2) {
-                        if (isBrowserPreferred(site) && isAtlassianCloudSite(site)) {
+                        if (isAtlassianCloudSite(site)) {
                             showProfessionalConnectionInfo(site);
                         } else if (isBrowserPreferred(site)) {
                             showSiteOpeningMode(site);
@@ -3181,6 +3185,10 @@ public class MainActivity extends Activity {
 
     private void editSiteCredentials(SiteProfile site) {
         if (site == null) return;
+        if (isAtlassianCloudSite(site)) {
+            showProfessionalConnectionInfo(site);
+            return;
+        }
 
         if (!("FORM".equals(site.authType) || "BASIC".equals(site.authType))) {
             new AlertDialog.Builder(this)
