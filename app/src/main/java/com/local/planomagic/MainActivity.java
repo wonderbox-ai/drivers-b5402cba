@@ -1488,7 +1488,11 @@ public class MainActivity extends Activity {
         String user = JSONObject.quote(activeSite.username);
         String pass = JSONObject.quote(activeSite.password);
 
-        web.evaluateJavascript(loginScript(user, pass), r -> {
+        final String expectedHost = currentHost;
+        final String siteId = activeSite.id;
+        web.evaluateJavascript(loginScript(user, pass, expectedHost), r -> {
+            if (mode != Mode.CUSTOM || activeSite == null
+                    || !siteId.equals(activeSite.id)) return;
             if (r != null && r.contains("OK")) {
                 genericFormTried = true;
                 status("BASIC_FORM".equals(activeSite.authType)
@@ -1518,7 +1522,14 @@ public class MainActivity extends Activity {
     }
 
     private String loginScript(String userJson, String passJson) {
+        return loginScript(userJson, passJson, PLANO_HOST);
+    }
+
+    private String loginScript(String userJson, String passJson, String host) {
+        String hostJson = JSONObject.quote(host == null ? "" : host.toLowerCase(Locale.ROOT));
         return "(function(){"
+                + "if(location.protocol!=='https:'||location.hostname.toLowerCase()!==" + hostJson
+                + ")return 'HOST';"
                 + "function V(e){if(!e)return false;var r=e.getBoundingClientRect();return r.width>0&&r.height>0;}"
                 + "var p=[].slice.call(document.querySelectorAll('input[type=password]')).find(V);"
                 + "if(!p)return 'NONE';"
