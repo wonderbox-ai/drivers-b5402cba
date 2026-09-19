@@ -81,6 +81,7 @@ public class MainActivity extends Activity {
     private String pendingShortcutSiteId;
     private String pendingLauncherAction;
     private String waitingVpnSiteId;
+    private long waitingVpnStartedAt;
     private long backgroundAt = 0L;
     private CancellationSignal biometricCancellation;
     private boolean onHome = true;
@@ -1675,6 +1676,10 @@ public class MainActivity extends Activity {
 
     private void openCustom(SiteProfile site) {
         if (site == null) return;
+        if (waitingVpnSiteId != null && !site.id.equals(waitingVpnSiteId)) {
+            waitingVpnSiteId = null; // Opening another app cancels a pending VPN handoff.
+            waitingVpnStartedAt = 0L;
+        }
         if (hasInvalidProviderEntryPoint(site)) {
             explainEntryPoint(site);
             return;
@@ -1786,6 +1791,7 @@ public class MainActivity extends Activity {
         }
 
         waitingVpnSiteId = site.resumeAfterVpn ? site.id : null;
+        waitingVpnStartedAt = System.currentTimeMillis();
         try {
             startActivity(launch);
             logEvent("Ouverture FortiClient", site.name);
@@ -1832,8 +1838,16 @@ public class MainActivity extends Activity {
     private void resumeWaitingVpnSite() {
         if (!unlocked || waitingVpnSiteId == null || !hasActiveVpn()
                 || isFinishing()) return;
+        if (waitingVpnStartedAt <= 0L
+                || System.currentTimeMillis() - waitingVpnStartedAt > 10 * 60 * 1000L) {
+            waitingVpnSiteId = null;
+            waitingVpnStartedAt = 0L;
+            status("Connexion VPN à relancer");
+            return;
+        }
         String siteId = waitingVpnSiteId;
         waitingVpnSiteId = null; // Never reopen after another return from browser.
+        waitingVpnStartedAt = 0L;
         SiteProfile site = findById(loadSites(), siteId);
         if (site == null || !(site.vpnRequired || isInternalHttp(site))) return;
 
@@ -4470,7 +4484,14 @@ public class MainActivity extends Activity {
         super.onResume();
         if (unlocked && waitingVpnSiteId != null) {
             // Activity lifecycle runs after Android evaluates background auto-lock.
-            timer.post(this::resumeWaitingVpnSite);
+            timer.post(() -> {
+                if (waitingVpnSiteId == null) return;
+                if (!hasActiveVpn()) {
+                    status("VPN en attente • ouvre FortiClient et valide FortiToken");
+                    return;
+                }
+                resumeWaitingVpnSite();
+            });
         }
     }
 
