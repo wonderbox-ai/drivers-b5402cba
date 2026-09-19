@@ -49,7 +49,9 @@ jobs:
           test -n "$ANDROID_KEYSTORE_PASSWORD"
           test -n "$ANDROID_KEY_ALIAS"
           test -n "$ANDROID_KEY_PASSWORD"
-          gradle clean assembleRelease bundleRelease lintRelease
+          gradle clean assembleRelease bundleRelease lintRelease testReleaseUnitTest
+          /usr/local/lib/android/sdk/build-tools/35.0.0/apksigner verify --verbose app/build/outputs/apk/release/app-release.apk
+          jarsigner -verify app/build/outputs/bundle/release/app-release.aab
 
       - name: SHA-256
         shell: bash
