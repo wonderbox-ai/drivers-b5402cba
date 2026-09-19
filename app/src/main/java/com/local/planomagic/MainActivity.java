@@ -3,10 +3,14 @@ package com.local.planomagic;
 import android.app.*;
 import android.content.SharedPreferences;
 import android.content.Intent;
+import android.content.ClipData;
 import android.content.pm.ShortcutManager;
 import android.content.pm.ShortcutInfo;
 import android.graphics.drawable.Icon;
 import android.graphics.Color;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.GradientDrawable;
@@ -671,6 +675,10 @@ public class MainActivity extends Activity {
                 "AUTO",
                 accent());
         card.setOnClickListener(v -> openPlano());
+        card.setOnLongClickListener(v -> {
+            showPlanoActions();
+            return true;
+        });
         homeList.addView(card);
     }
 
@@ -1255,6 +1263,16 @@ public class MainActivity extends Activity {
     }
 
     private void openPlano() {
+        boolean requireBio = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .getBoolean(KEY_PLANO_REQUIRE_BIO, false);
+        if (requireBio) {
+            requestSiteAuthentication("Plano", this::openPlanoNow);
+        } else {
+            openPlanoNow();
+        }
+    }
+
+    private void openPlanoNow() {
         if (!secrets.isConfigured()) {
             editPlanoCredentials(true);
             return;
@@ -1263,6 +1281,8 @@ public class MainActivity extends Activity {
         clearTransientState();
         mode = Mode.PLANO;
         activeSite = null;
+        applyScreenProtection(getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .getBoolean(KEY_PLANO_BLOCK_SCREEN, false));
         showWeb("Plano");
         status("Ouverture…");
         web.loadUrl(PLANO_URL);
@@ -1276,19 +1296,49 @@ public class MainActivity extends Activity {
             return;
         }
 
+        if (s.requireBiometric) {
+            requestSiteAuthentication(s.name, () -> openCustomNow(s));
+        } else {
+            openCustomNow(s);
+        }
+    }
+
+    private void openCustomNow(SiteProfile s) {
+        if (s == null) return;
+
+        s.lastUsed = System.currentTimeMillis();
+        List<SiteProfile> sites = loadSites();
+        SiteProfile saved = findById(sites, s.id);
+        if (saved != null) {
+            saved.lastUsed = s.lastUsed;
+            saveSites(sites);
+        }
+
         clearTransientState();
         mode = Mode.CUSTOM;
         activeSite = s;
+        applyScreenProtection(s.blockScreenshots);
         showWeb(s.name);
         status("Ouverture…");
         web.loadUrl(s.url);
     }
 
     private void showHome(String msg) {
+        Mode previousMode = mode;
+        SiteProfile previousSite = activeSite;
+
+        if (previousMode == Mode.CUSTOM && previousSite != null && previousSite.lockOnExit) {
+            clearSiteSession(previousSite.url, "BASIC".equals(previousSite.authType));
+        } else if (previousMode == Mode.PLANO
+                && getSharedPreferences(SETTINGS, MODE_PRIVATE).getBoolean(KEY_PLANO_LOCK_EXIT, false)) {
+            clearSiteSession(PLANO_URL, true);
+        }
+
         analysisMode = false;
         mode = Mode.NONE;
         activeSite = null;
         onHome = true;
+        applyScreenProtection(false);
 
         rebuildHome();
 
@@ -1307,6 +1357,147 @@ public class MainActivity extends Activity {
         headerTitle.setText(title);
         homeButton.setVisibility(View.VISIBLE);
         refreshButton.setVisibility(View.VISIBLE);
+    }
+
+    private void applyScreenProtection(boolean enabled) {
+        if (enabled) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
+    }
+
+    private void requestSiteAuthentication(String siteName, Runnable onSuccess) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Biométrie indisponible")
+                    .setMessage("Cette protection nécessite Android 9 ou une version plus récente.")
+                    .setPositiveButton("OK", null)
+                    .show();
+            return;
+        }
+
+        try {
+            CancellationSignal signal = new CancellationSignal();
+            new BiometricPrompt.Builder(this)
+                    .setTitle("Accès sécurisé • " + siteName)
+                    .setSubtitle("Confirme ton identité pour ouvrir cette application")
+                    .setNegativeButton("Annuler", getMainExecutor(), (dialog, which) -> {})
+                    .build()
+                    .authenticate(signal, getMainExecutor(), new BiometricPrompt.AuthenticationCallback() {
+                        @Override
+                        public void onAuthenticationSucceeded(BiometricPrompt.AuthenticationResult result) {
+                            super.onAuthenticationSucceeded(result);
+                            if (onSuccess != null) onSuccess.run();
+                        }
+                    });
+        } catch (Exception e) {
+            Toast.makeText(this, "Biométrie indisponible sur ce téléphone", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void handlePendingShortcut() {
+        String id = pendingShortcutSiteId;
+        pendingShortcutSiteId = null;
+        if (id == null || id.isEmpty() || !unlocked || isFinishing()) return;
+
+        if (SITE_PLANO_ID.equals(id)) {
+            openPlano();
+            return;
+        }
+
+        SiteProfile site = findById(loadSites(), id);
+        if (site == null) {
+            Toast.makeText(this, "Cette application n’existe plus dans Wonder Apps.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        openCustom(site);
+    }
+
+    private void clearSiteSession(String url, boolean clearHttpAuth) {
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            String cookieHeader = cm.getCookie(url);
+            if (cookieHeader != null && !cookieHeader.isEmpty()) {
+                Uri u = Uri.parse(url);
+                String base = (u.getScheme() == null ? "https" : u.getScheme()) + "://" + u.getHost();
+                String[] cookies = cookieHeader.split(";");
+                for (String cookie : cookies) {
+                    int eq = cookie.indexOf('=');
+                    if (eq > 0) {
+                        String name = cookie.substring(0, eq).trim();
+                        cm.setCookie(base, name + "=; Max-Age=0; Path=/; Secure");
+                    }
+                }
+                cm.flush();
+            }
+            if (clearHttpAuth) WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
+        } catch (Exception ignored) {}
+    }
+
+    private void resetSiteSession(String siteId, String url, boolean clearHttpAuth) {
+        clearSiteSession(url, clearHttpAuth);
+        if (activeSite != null && siteId != null && siteId.equals(activeSite.id)) {
+            web.stopLoading();
+            web.loadUrl("about:blank");
+        }
+        clearTransientState();
+        Toast.makeText(this, "Session de cette application réinitialisée", Toast.LENGTH_SHORT).show();
+    }
+
+    private Bitmap automaticShortcutIcon(String siteId, String name) {
+        Bitmap custom = loadSiteLogoBitmap(siteId);
+        if (custom != null) return custom;
+        if (SITE_PLANO_ID.equals(siteId)) {
+            return BitmapFactory.decodeResource(getResources(), R.drawable.app_icon_photo);
+        }
+
+        int size = 256;
+        Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bgPaint.setColor(accent());
+        canvas.drawRoundRect(0, 0, size, size, 52, 52, bgPaint);
+
+        Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        textPaint.setColor(Color.WHITE);
+        textPaint.setTextAlign(Paint.Align.CENTER);
+        textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+        textPaint.setTextSize(112);
+        String letter = name == null || name.isEmpty() ? "A" : name.substring(0, 1).toUpperCase(Locale.ROOT);
+        Paint.FontMetrics fm = textPaint.getFontMetrics();
+        float y = size / 2f - (fm.ascent + fm.descent) / 2f;
+        canvas.drawText(letter, size / 2f, y, textPaint);
+        return bitmap;
+    }
+
+    private void pinSiteShortcut(String siteId, String name) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Toast.makeText(this, "Les raccourcis personnalisés nécessitent Android 8 ou plus récent.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        ShortcutManager manager = getSystemService(ShortcutManager.class);
+        if (manager == null || !manager.isRequestPinShortcutSupported()) {
+            Toast.makeText(this, "Le lanceur de ce téléphone ne permet pas les raccourcis épinglés.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        Intent launch = new Intent(this, MainActivity.class);
+        launch.setAction("com.local.planomagic.OPEN_SITE");
+        launch.putExtra("shortcut_site_id", siteId);
+        launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+        String safeId = (siteId == null ? "site" : siteId).replaceAll("[^a-zA-Z0-9._-]", "_");
+        ShortcutInfo shortcut = new ShortcutInfo.Builder(this, "wonderapps_" + safeId)
+                .setShortLabel(name)
+                .setLongLabel(name)
+                .setIcon(Icon.createWithBitmap(automaticShortcutIcon(siteId, name)))
+                .setIntent(launch)
+                .build();
+
+        manager.requestPinShortcut(shortcut, null);
     }
 
     private LinearLayout dialogStack() {
@@ -2312,6 +2503,7 @@ public class MainActivity extends Activity {
 
         if (resultCode != RESULT_OK || data == null || data.getData() == null) {
             pendingBackupPassword = null;
+            if (requestCode == REQ_PICK_SITE_LOGO) pendingSiteLogoId = null;
             if (requestCode == REQ_IMPORT_BACKUP && importFromOnboarding) {
                 importFromOnboarding = false;
                 timer.postDelayed(this::startOnboarding, 250);
@@ -2328,8 +2520,10 @@ public class MainActivity extends Activity {
             boolean fromOnboarding = importFromOnboarding;
             importFromOnboarding = false;
             promptImportPassword(uri, fromOnboarding);
-        } else if (requestCode == REQ_PICK_LOGO) {
-            savePickedLogo(uri);
+        } else if (requestCode == REQ_PICK_SITE_LOGO) {
+            String siteId = pendingSiteLogoId;
+            pendingSiteLogoId = null;
+            if (siteId != null) savePickedSiteLogo(uri, siteId);
         }
     }
 
