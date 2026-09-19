@@ -2673,11 +2673,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean isInternalHttp(SiteProfile site) {
+        if (site == null || site.url == null) return false;
+        Uri uri = Uri.parse(site.url);
+        return SiteRoutingPolicy.isAllowedInternalHttp(uri.getScheme(), uri.getHost());
+    }
+
     private void editSiteAddress(SiteProfile existing) {
         boolean edit = existing != null;
 
         EditText name = input("Nom du site", false);
-        EditText url = input("https://exemple.com", false);
+        EditText url = input("https://… ou http://site.wonderbox.vpn/…", false);
         EditText category = input("Catégorie (facultatif) — ex. IT, RH, Support", false);
 
         if (edit) {
@@ -2686,94 +2692,132 @@ public class MainActivity extends Activity {
             category.setText(existing.category);
         }
 
-        AlertDialog d = new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(edit ? "Modifier le site" : "Ajouter un site")
-                .setMessage(edit
-                        ? "Si l’adresse change, une nouvelle analyse sera lancée."
-                        : "Tu n’as besoin de connaître aucun type d’authentification. L’analyse se fait automatiquement.")
+                .setMessage("HTTPS reste le mode sécurisé normal. Les sites HTTP "
+                        + "internes Wonderbox accessibles par VPN peuvent être ajoutés "
+                        + "uniquement comme raccourcis vers un navigateur externe.")
                 .setView(form(name, url, category))
-                .setPositiveButton(edit ? "Enregistrer" : "Enregistrer et analyser", null)
+                .setPositiveButton(edit ? "Enregistrer" : "Ajouter l’application", null)
                 .setNegativeButton("Annuler", null)
                 .create();
 
-        d.setOnShowListener(x -> d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String n = name.getText().toString().trim();
-            String raw = url.getText().toString().trim();
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(v -> {
+                    String siteName = name.getText().toString().trim();
+                    String entered = url.getText().toString().trim();
+                    if (siteName.isEmpty() || entered.isEmpty()) {
+                        Toast.makeText(this, "Nom et adresse requis", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
 
-            if (n.isEmpty() || raw.isEmpty()) {
-                Toast.makeText(this, "Nom et adresse requis", Toast.LENGTH_SHORT).show();
-                return;
-            }
+                    if (!entered.regionMatches(true, 0, "http://", 0, 7)
+                            && !entered.regionMatches(true, 0, "https://", 0, 8)) {
+                        entered = "https://" + entered;
+                    }
 
-            if (!raw.startsWith("https://")) {
-                if (raw.startsWith("http://")) {
-                    Toast.makeText(this, "Seuls les sites HTTPS sont acceptés", Toast.LENGTH_LONG).show();
-                    return;
-                }
-                raw = "https://" + raw;
-            }
+                    Uri parsed = Uri.parse(entered);
+                    String scheme = parsed.getScheme();
+                    String host = parsed.getHost();
+                    String authority = parsed.getEncodedAuthority();
+                    boolean internalHttp =
+                            SiteRoutingPolicy.isAllowedInternalHttp(scheme, host);
 
-            Uri parsed = Uri.parse(raw);
+                    if (host == null || authority == null || authority.contains("@")
+                            || !("https".equalsIgnoreCase(scheme) || internalHttp)) {
+                        url.setError("HTTPS requis, sauf site interne *.wonderbox.vpn en HTTP");
+                        Toast.makeText(this,
+                                "HTTP réservé aux sites internes Wonderbox VPN ; HTTPS pour les autres.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
 
-            if (parsed.getHost() == null || !"https".equalsIgnoreCase(parsed.getScheme())) {
-                Toast.makeText(this, "Adresse HTTPS invalide", Toast.LENGTH_SHORT).show();
-                return;
-            }
+                    if (isProviderEntryHost(host)) {
+                        url.setError("Saisis l’adresse du site, pas une page de connexion");
+                        new AlertDialog.Builder(this)
+                                .setTitle("Adresse de l’application")
+                                .setMessage("Enregistre l’adresse de départ de " + siteName
+                                        + ", et non la page de connexion Microsoft ou Atlassian.")
+                                .setPositiveButton("Corriger", null)
+                                .show();
+                        return;
+                    }
 
-            if (isProviderEntryHost(parsed.getHost())) {
-                url.setError("Saisis l’adresse du site, pas une page de connexion");
-                new AlertDialog.Builder(this)
-                        .setTitle("Adresse de l’application")
-                        .setMessage("Enregistre l’adresse de départ de " + n
-                                + " (celle que tu ouvres habituellement), et non la page "
-                                + "de connexion Atlassian, Microsoft ou Google. Le navigateur "
-                                + "s’occupera ensuite des redirections sécurisées.")
-                        .setPositiveButton("Corriger", null)
-                        .show();
-                return;
-            }
+                    final String finalUrl = entered;
+                    final String finalCategory = category.getText().toString().trim();
 
-            List<SiteProfile> sites = loadSites();
-            SiteProfile s;
+                    Runnable persist = () -> {
+                        List<SiteProfile> sites = loadSites();
+                        SiteProfile site;
+                        if (edit) {
+                            site = findById(sites, existing.id);
+                            if (site == null) site = existing;
 
-            if (edit) {
-                s = findById(sites, existing.id);
-                if (s == null) s = existing;
+                            boolean addressChanged = !finalUrl.equalsIgnoreCase(site.url);
+                            site.name = siteName;
+                            site.url = finalUrl;
+                            site.category = finalCategory;
 
-                boolean urlChanged = !raw.equalsIgnoreCase(s.url);
-                s.name = n;
-                s.url = raw;
-                s.category = category.getText().toString().trim();
+                            if (addressChanged) {
+                                site.authType = "PENDING";
+                                site.loginHost = "";
+                                site.username = "";
+                                site.password = "";
+                            }
+                        } else {
+                            site = new SiteProfile();
+                            site.id = UUID.randomUUID().toString();
+                            site.name = siteName;
+                            site.url = finalUrl;
+                            site.category = finalCategory;
+                            site.authType = "PENDING";
+                            sites.add(site);
+                        }
 
-                if (urlChanged) {
-                    s.authType = "PENDING";
-                    s.loginHost = "";
-                    s.username = "";
-                    s.password = "";
-                }
-            } else {
-                s = new SiteProfile();
-                s.id = UUID.randomUUID().toString();
-                s.name = n;
-                s.url = raw;
-                s.category = category.getText().toString().trim();
-                s.authType = "PENDING";
-                sites.add(s);
-            }
+                        if (internalHttp) {
+                            // A VPN does not convert the origin into HTTPS.
+                            // Never place passwords in our WebView or JS for HTTP.
+                            site.authType = "NONE";
+                            site.loginHost = "";
+                            site.username = "";
+                            site.password = "";
+                            site.openingMode = "BROWSER";
+                            site.vpnRequired = true;
+                            site.lockOnExit = false;
+                        }
 
-            saveSites(sites);
-            d.dismiss();
+                        saveSites(sites);
+                        dialog.dismiss();
+                        if (isBrowserPreferred(site)) {
+                            showHome("Application enregistrée");
+                            Toast.makeText(this, internalHttp
+                                            ? "Site interne ajouté • connexion VPN nécessaire"
+                                            : site.name + " s’ouvrira dans le navigateur",
+                                    Toast.LENGTH_LONG).show();
+                        } else {
+                            analyzeSite(site);
+                        }
+                    };
 
-            if (isBrowserPreferred(s)) {
-                showHome("Application enregistrée");
-                Toast.makeText(this, s.name + " s’ouvrira dans le navigateur du téléphone",
-                        Toast.LENGTH_LONG).show();
-            } else {
-                analyzeSite(s);
-            }
-        }));
+                    if (internalHttp) {
+                        new AlertDialog.Builder(this)
+                                .setTitle("Site interne HTTP via VPN")
+                                .setMessage("Wonder Apps ajoutera ce site comme raccourci "
+                                        + "vers le navigateur du téléphone et demandera "
+                                        + "la connexion VPN. HTTP n’est pas chiffré par "
+                                        + "le site : même avec un VPN, sa sécurité de bout "
+                                        + "en bout n’est pas équivalente à HTTPS. "
+                                        + "Aucun identifiant ni mot de passe ne sera "
+                                        + "stocké ou injecté par Wonder Apps pour ce site.")
+                                .setPositiveButton("Ajouter ce site", (d,w) -> persist.run())
+                                .setNegativeButton("Annuler", null)
+                                .show();
+                    } else {
+                        persist.run();
+                    }
+                }));
 
-        d.show();
+        dialog.show();
     }
 
     private void showSiteActions(SiteProfile site) {
