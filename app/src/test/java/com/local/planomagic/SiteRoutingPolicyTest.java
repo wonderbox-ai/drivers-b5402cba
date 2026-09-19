@@ -78,6 +78,21 @@ public class SiteRoutingPolicyTest {
                 "https", "an-internal-service.example", true));
     }
 
+    @Test public void wonderviewLegacyHttpsCanBeCorrectedButOtherSitesAreNotDowngraded() {
+        assertTrue(SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                "https", "wonderview.wonderbox.vpn"));
+        assertTrue(SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                "HTTPS", "WONDERVIEW.WONDERBOX.VPN"));
+        assertFalse(SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                "http", "wonderview.wonderbox.vpn"));
+        assertFalse(SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                "https", "wonderview.wonderbox.vpn.evil.example"));
+        assertFalse(SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                "https", "nova.wonderbox.com"));
+        assertFalse(SiteRoutingPolicy.isKnownWonderViewHttpsMismatch(
+                "https", "another.wonderbox.vpn"));
+    }
+
     @Test public void autoLockIsEvaluatedBeforeShortcutOpens() {
         long backgroundAt = 1_000_000L;
         assertFalse(SiteRoutingPolicy.shouldRelock(backgroundAt, backgroundAt + 59000, 60));
