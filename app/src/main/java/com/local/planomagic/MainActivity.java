@@ -575,11 +575,12 @@ public class MainActivity extends Activity {
             boolean auto = ("FORM".equals(type) || "BASIC".equals(type))
                     && !site.username.isEmpty()
                     && !site.password.isEmpty();
-            if (auto) autoCount++;
+            if (auto && !isBrowserPreferred(site)) autoCount++;
 
-            if ("PENDING".equals(type) || "UNKNOWN".equals(type)
+            if (!isBrowserPreferred(site)
+                    && ("PENDING".equals(type) || "UNKNOWN".equals(type)
                     || (("FORM".equals(type) || "BASIC".equals(type))
-                    && (site.username.isEmpty() || site.password.isEmpty()))) {
+                    && (site.username.isEmpty() || site.password.isEmpty())))) {
                 actionCount++;
             }
         }
@@ -793,8 +794,8 @@ public class MainActivity extends Activity {
                     site.id,
                     site.name,
                     context + " • " + siteStateLabel(site),
-                    authShort(site.authType),
-                    authColor(site.authType));
+                    isBrowserPreferred(site) ? "WEB" : authShort(site.authType),
+                    isBrowserPreferred(site) ? accent() : authColor(site.authType));
             card.setOnClickListener(v -> openCustom(site));
             card.setOnLongClickListener(v -> {
                 showSiteActions(site);
@@ -881,8 +882,8 @@ public class MainActivity extends Activity {
                 site.id,
                 site.name,
                 context + " • " + siteStateLabel(site),
-                authShort(type),
-                authColor(type));
+                isBrowserPreferred(site) ? "WEB" : authShort(type),
+                isBrowserPreferred(site) ? accent() : authColor(type));
 
         card.setOnClickListener(v -> openCustom(site));
 
@@ -958,7 +959,7 @@ public class MainActivity extends Activity {
     private String siteStateLabel(SiteProfile site) {
         if (site == null) return "Configuration à vérifier";
         String type = site.authType == null ? "PENDING" : site.authType;
-        if ("BROWSER".equals(site.openingMode)) return "S’ouvre dans le navigateur";
+        if (isBrowserPreferred(site)) return "Connexion via navigateur";
         if ("SSO".equals(type)) return "Connexion professionnelle";
         if ("MFA".equals(type)) return "Validation de connexion nécessaire";
         if ("PENDING".equals(type) || "UNKNOWN".equals(type)) return "Configuration à vérifier";
@@ -1527,11 +1528,26 @@ public class MainActivity extends Activity {
         logEvent("Ouverture", "Plano");
     }
 
+    private boolean isAtlassianCloudSite(SiteProfile site) {
+        if (site == null || site.url == null) return false;
+        String host = Uri.parse(site.url).getHost();
+        if (host == null) return false;
+        String lower = host.toLowerCase(Locale.ROOT);
+        return lower.endsWith(".atlassian.net");
+    }
+
+    private boolean isProviderEntryHost(String host) {
+        return commonSsoHost(host) || "id.atlassian.com".equalsIgnoreCase(host);
+    }
+
     private boolean isBrowserPreferred(SiteProfile site) {
         if (site == null) return false;
         if ("BROWSER".equals(site.openingMode)) return true;
         if ("IN_APP".equals(site.openingMode)) return false;
-        return "SSO".equals(site.authType) || "MFA".equals(site.authType);
+        // Atlassian Cloud may first display its own form before redirecting to
+        // the organization's Microsoft SSO. Do not inject saved passwords there.
+        return isAtlassianCloudSite(site)
+                || "SSO".equals(site.authType) || "MFA".equals(site.authType);
     }
 
     private boolean hasInvalidProviderEntryPoint(SiteProfile site) {
@@ -1539,13 +1555,13 @@ public class MainActivity extends Activity {
         Uri uri = Uri.parse(site.url == null ? "" : site.url);
         return !"https".equalsIgnoreCase(uri.getScheme())
                 || uri.getHost() == null
-                || commonSsoHost(uri.getHost());
+                || isProviderEntryHost(uri.getHost());
     }
 
     private void explainEntryPoint(SiteProfile site) {
         new AlertDialog.Builder(this)
                 .setTitle("Adresse à corriger • " + site.name)
-                .setMessage("L’adresse enregistrée est une page de connexion Microsoft "
+                .setMessage("L’adresse enregistrée est une page de connexion Atlassian, Microsoft "
                         + "ou Google, et non le site " + site.name + ". Pour conserver "
                         + "le retour automatique après identification, enregistre l’adresse "
                         + "du site que tu ouvres normalement dans ton navigateur. "
@@ -1564,7 +1580,7 @@ public class MainActivity extends Activity {
 
         Runnable open = () -> {
             if ("PENDING".equals(site.authType) || "UNKNOWN".equals(site.authType)) {
-                if ("BROWSER".equals(site.openingMode)) openBrowserForSite(site);
+                if (isBrowserPreferred(site)) openBrowserForSite(site);
                 else analyzeSite(site);
             } else if (isBrowserPreferred(site)) {
                 openBrowserForSite(site);
@@ -2532,13 +2548,13 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            if (commonSsoHost(parsed.getHost())) {
-                url.setError("Saisis l’adresse du site, pas celle de Microsoft / Google");
+            if (isProviderEntryHost(parsed.getHost())) {
+                url.setError("Saisis l’adresse du site, pas une page de connexion");
                 new AlertDialog.Builder(this)
                         .setTitle("Adresse de l’application")
                         .setMessage("Enregistre l’adresse de départ de " + n
                                 + " (celle que tu ouvres habituellement), et non la page "
-                                + "de connexion Microsoft ou Google. Le navigateur "
+                                + "de connexion Atlassian, Microsoft ou Google. Le navigateur "
                                 + "s’occupera ensuite des redirections sécurisées.")
                         .setPositiveButton("Corriger", null)
                         .show();
@@ -2576,7 +2592,13 @@ public class MainActivity extends Activity {
             saveSites(sites);
             d.dismiss();
 
-            analyzeSite(s);
+            if (isBrowserPreferred(s)) {
+                showHome("Application enregistrée");
+                Toast.makeText(this, s.name + " s’ouvrira dans le navigateur du téléphone",
+                        Toast.LENGTH_LONG).show();
+            } else {
+                analyzeSite(s);
+            }
         }));
 
         d.show();
@@ -2608,7 +2630,7 @@ public class MainActivity extends Activity {
                     if (which == 0) openCustom(site);
                     else if (which == 1) editSiteAddress(site);
                     else if (which == 2) {
-                        if ("SSO".equals(site.authType) || "MFA".equals(site.authType)) {
+                        if (isBrowserPreferred(site)) {
                             showSiteOpeningMode(site);
                         } else editSiteCredentials(site);
                     }
