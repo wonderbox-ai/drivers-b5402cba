@@ -18,6 +18,8 @@ import android.net.Uri;
 import android.os.*;
 import android.hardware.biometrics.BiometricPrompt;
 import android.text.InputType;
+import android.text.TextWatcher;
+import android.text.Editable;
 import android.view.*;
 import android.webkit.*;
 import android.widget.*;
@@ -578,6 +580,13 @@ public class MainActivity extends Activity {
         ready.setLayoutParams(readyLp);
         homeList.addView(ready);
 
+        TextView searchButton = actionButton("⌕  Rechercher une application", false);
+        LinearLayout.LayoutParams searchLp = new LinearLayout.LayoutParams(-1, dp(46));
+        searchLp.setMargins(0, 0, 0, dp(12));
+        searchButton.setLayoutParams(searchLp);
+        searchButton.setOnClickListener(v -> showSearchApps());
+        homeList.addView(searchButton);
+
         LinearLayout stats = new LinearLayout(this);
         stats.setOrientation(LinearLayout.HORIZONTAL);
         stats.setWeightSum(3f);
@@ -592,6 +601,44 @@ public class MainActivity extends Activity {
         homeList.addView(stats);
 
         SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+
+        Map<String, Long> recentTimes = new HashMap<>();
+        long planoLast = prefs.getLong("plano_last_used", 0L);
+        if (planoLast > 0L) recentTimes.put(SITE_PLANO_ID, planoLast);
+        for (SiteProfile site : customSites) {
+            if (site.lastUsed > 0L) recentTimes.put(site.id, site.lastUsed);
+        }
+
+        if (!recentTimes.isEmpty()) {
+            List<String> recentIds = new ArrayList<>(recentTimes.keySet());
+            recentIds.sort((a,b) -> Long.compare(recentTimes.get(b), recentTimes.get(a)));
+
+            TextView recentTitle = new TextView(this);
+            recentTitle.setText("Récents");
+            recentTitle.setTextSize(18);
+            recentTitle.setTextColor(primary());
+            LinearLayout.LayoutParams recentLp = new LinearLayout.LayoutParams(-1, -2);
+            recentLp.setMargins(dp(2), 0, 0, dp(10));
+            recentTitle.setLayoutParams(recentLp);
+            homeList.addView(recentTitle);
+
+            int shownRecent = 0;
+            for (String id : recentIds) {
+                if (shownRecent >= 3) break;
+                if (SITE_PLANO_ID.equals(id)) {
+                    addPlanoCard();
+                } else {
+                    SiteProfile site = findById(customSites, id);
+                    if (site != null) addCustomCard(site);
+                }
+                shownRecent++;
+            }
+
+            View spacer = new View(this);
+            spacer.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(8)));
+            homeList.addView(spacer);
+        }
+
         boolean planoFavorite = prefs.getBoolean(KEY_PLANO_FAVORITE, false);
         List<SiteProfile> favorites = new ArrayList<>();
         for (SiteProfile site : customSites) {
@@ -654,6 +701,88 @@ public class MainActivity extends Activity {
         idea.setLayoutParams(ideaLp);
         idea.setOnClickListener(v -> showFeedbackDialog());
         homeList.addView(idea);
+    }
+
+    private void showSearchApps() {
+        LinearLayout stack = dialogStack();
+
+        EditText query = input("Rechercher par nom, domaine ou catégorie", false);
+        LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
+
+        ScrollView resultScroll = new ScrollView(this);
+        resultScroll.setFillViewport(false);
+        resultScroll.addView(results);
+        LinearLayout.LayoutParams resultLp = new LinearLayout.LayoutParams(-1, dp(360));
+        resultLp.setMargins(0, dp(8), 0, 0);
+        resultScroll.setLayoutParams(resultLp);
+
+        stack.addView(query);
+        stack.addView(resultScroll);
+
+        refreshSearchResults("", results);
+
+        query.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                refreshSearchResults(String.valueOf(s), results);
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle("Rechercher")
+                .setView(stack)
+                .setNegativeButton("Fermer", null)
+                .show();
+    }
+
+    private void refreshSearchResults(String rawQuery, LinearLayout results) {
+        results.removeAllViews();
+        String q = rawQuery == null ? "" : rawQuery.trim().toLowerCase(Locale.ROOT);
+
+        if (q.isEmpty() || "plano".contains(q) || PLANO_HOST.contains(q)) {
+            LinearLayout plano = dashboardAppCard(
+                    SITE_PLANO_ID,
+                    "Plano",
+                    "Connexion automatique • Prêt",
+                    "AUTO",
+                    accent());
+            plano.setOnClickListener(v -> openPlano());
+            plano.setOnLongClickListener(v -> {
+                showPlanoActions();
+                return true;
+            });
+            results.addView(plano);
+        }
+
+        for (SiteProfile site : loadSites()) {
+            Uri uri = Uri.parse(site.url);
+            String host = uri.getHost() == null ? site.url : uri.getHost();
+            String haystack = (site.name + " " + host + " " + site.category).toLowerCase(Locale.ROOT);
+            if (!q.isEmpty() && !haystack.contains(q)) continue;
+
+            String context = site.category == null || site.category.trim().isEmpty()
+                    ? host
+                    : site.category.trim() + " • " + host;
+
+            LinearLayout card = dashboardAppCard(
+                    site.id,
+                    site.name,
+                    context + " • " + siteStateLabel(site),
+                    authShort(site.authType),
+                    authColor(site.authType));
+            card.setOnClickListener(v -> openCustom(site));
+            card.setOnLongClickListener(v -> {
+                showSiteActions(site);
+                return true;
+            });
+            results.addView(card);
+        }
+
+        if (results.getChildCount() == 0) {
+            results.addView(smallNote("Aucune application ne correspond à cette recherche."));
+        }
     }
 
     private LinearLayout statTile(String value, String label) {
@@ -721,11 +850,14 @@ public class MainActivity extends Activity {
         String type = site.authType == null ? "PENDING" : site.authType;
         Uri uri = Uri.parse(site.url);
         String host = uri.getHost() == null ? site.url : uri.getHost();
+        String context = site.category == null || site.category.trim().isEmpty()
+                ? host
+                : site.category.trim() + " • " + host;
 
         LinearLayout card = dashboardAppCard(
                 site.id,
                 site.name,
-                host + " • " + siteStateLabel(site),
+                context + " • " + siteStateLabel(site),
                 authShort(type),
                 authColor(type));
 
@@ -2044,10 +2176,12 @@ public class MainActivity extends Activity {
 
         EditText name = input("Nom du site", false);
         EditText url = input("https://exemple.com", false);
+        EditText category = input("Catégorie (facultatif) — ex. IT, RH, Support", false);
 
         if (edit) {
             name.setText(existing.name);
             url.setText(existing.url);
+            category.setText(existing.category);
         }
 
         AlertDialog d = new AlertDialog.Builder(this)
@@ -2055,7 +2189,7 @@ public class MainActivity extends Activity {
                 .setMessage(edit
                         ? "Si l’adresse change, une nouvelle analyse sera lancée."
                         : "Tu n’as besoin de connaître aucun type d’authentification. L’analyse se fait automatiquement.")
-                .setView(form(name, url))
+                .setView(form(name, url, category))
                 .setPositiveButton(edit ? "Enregistrer" : "Enregistrer et analyser", null)
                 .setNegativeButton("Annuler", null)
                 .create();
@@ -2094,6 +2228,7 @@ public class MainActivity extends Activity {
                 boolean urlChanged = !raw.equalsIgnoreCase(s.url);
                 s.name = n;
                 s.url = raw;
+                s.category = category.getText().toString().trim();
 
                 if (urlChanged) {
                     s.authType = "PENDING";
@@ -2106,6 +2241,7 @@ public class MainActivity extends Activity {
                 s.id = UUID.randomUUID().toString();
                 s.name = n;
                 s.url = raw;
+                s.category = category.getText().toString().trim();
                 s.authType = "PENDING";
                 sites.add(s);
             }
