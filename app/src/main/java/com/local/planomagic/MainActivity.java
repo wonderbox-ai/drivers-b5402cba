@@ -482,116 +482,221 @@ public class MainActivity extends Activity {
     private void rebuildHome() {
         homeList.removeAllViews();
 
-        TextView title = new TextView(this);
-        title.setText("Mes applis Wonderbox");
-        title.setTextSize(26);
-        title.setTextColor(primary());
-        homeList.addView(title);
+        List<SiteProfile> customSites = loadSites();
+        int appCount = 1 + customSites.size();
+        int autoCount = 1;
+        int actionCount = 0;
 
-        TextView intro = new TextView(this);
-        intro.setText("Ajoute simplement l’adresse d’un site : l’application analyse automatiquement sa méthode de connexion.");
-        intro.setTextSize(14);
-        intro.setTextColor(secondary());
-        LinearLayout.LayoutParams introLp = new LinearLayout.LayoutParams(-1, -2);
-        introLp.setMargins(0, dp(6), 0, dp(20));
-        intro.setLayoutParams(introLp);
-        homeList.addView(intro);
+        for (SiteProfile site : customSites) {
+            String type = site.authType == null ? "PENDING" : site.authType;
+            boolean auto = ("FORM".equals(type) || "BASIC".equals(type))
+                    && !site.username.isEmpty()
+                    && !site.password.isEmpty();
+            if (auto) autoCount++;
+
+            if ("PENDING".equals(type) || "UNKNOWN".equals(type)
+                    || (("FORM".equals(type) || "BASIC".equals(type))
+                    && (site.username.isEmpty() || site.password.isEmpty()))) {
+                actionCount++;
+            }
+        }
+
+        TextView hello = new TextView(this);
+        hello.setText("Bonjour 👋");
+        hello.setTextSize(25);
+        hello.setTextColor(primary());
+        homeList.addView(hello);
+
+        TextView ready = new TextView(this);
+        ready.setText(actionCount == 0
+                ? "Tout est prêt aujourd’hui !"
+                : actionCount + " action" + (actionCount > 1 ? "s" : "") + " à vérifier");
+        ready.setTextSize(14);
+        ready.setTextColor(secondary());
+        LinearLayout.LayoutParams readyLp = new LinearLayout.LayoutParams(-1, -2);
+        readyLp.setMargins(0, dp(3), 0, dp(16));
+        ready.setLayoutParams(readyLp);
+        homeList.addView(ready);
+
+        LinearLayout stats = new LinearLayout(this);
+        stats.setOrientation(LinearLayout.HORIZONTAL);
+        stats.setWeightSum(3f);
+
+        stats.addView(statTile(String.valueOf(appCount), "Applications"));
+        stats.addView(statTile(String.valueOf(autoCount), "Connexions auto"));
+        stats.addView(statTile(String.valueOf(actionCount), "À vérifier"));
+
+        LinearLayout.LayoutParams statsLp = new LinearLayout.LayoutParams(-1, -2);
+        statsLp.setMargins(0, 0, 0, dp(20));
+        stats.setLayoutParams(statsLp);
+        homeList.addView(stats);
+
+        TextView section = new TextView(this);
+        section.setText("Mes applications");
+        section.setTextSize(19);
+        section.setTextColor(primary());
+        LinearLayout.LayoutParams sectionLp = new LinearLayout.LayoutParams(-1, -2);
+        sectionLp.setMargins(dp(2), 0, 0, dp(10));
+        section.setLayoutParams(sectionLp);
+        homeList.addView(section);
 
         addPlanoCard();
 
-        for (SiteProfile s : loadSites()) {
-            addCustomCard(s);
+        for (SiteProfile site : customSites) {
+            addCustomCard(site);
         }
 
-        Button add = new Button(this);
-        add.setText("+ Ajouter un site");
-        add.setAllCaps(false);
-        add.setTextColor(darkMode ? Color.WHITE : Color.rgb(20,20,20));
-        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(-1, dp(54));
-        addLp.setMargins(0, dp(10), 0, 0);
+        TextView add = actionButton("+  Ajouter une application", false);
+        LinearLayout.LayoutParams addLp = new LinearLayout.LayoutParams(-1, dp(52));
+        addLp.setMargins(0, dp(8), 0, dp(10));
         add.setLayoutParams(addLp);
         add.setOnClickListener(v -> editSiteAddress(null));
         homeList.addView(add);
 
-        TextView hint = new TextView(this);
-        hint.setText("Analyse sans mot de passe : HTTP Basic, formulaire classique, SSO/MFA ou simple raccourci. Les identifiants ne sont demandés qu’après détection si nécessaire.");
-        hint.setTextSize(12);
-        hint.setTextColor(secondary());
-        LinearLayout.LayoutParams hintLp = new LinearLayout.LayoutParams(-1, -2);
-        hintLp.setMargins(dp(4), dp(12), dp(4), 0);
-        hint.setLayoutParams(hintLp);
-        homeList.addView(hint);
+        TextView idea = actionButton("💡  Proposer une idée", true);
+        LinearLayout.LayoutParams ideaLp = new LinearLayout.LayoutParams(-1, dp(52));
+        ideaLp.setMargins(0, 0, 0, dp(8));
+        idea.setLayoutParams(ideaLp);
+        idea.setOnClickListener(v -> showFeedbackDialog());
+        homeList.addView(idea);
+    }
+
+    private LinearLayout statTile(String value, String label) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER);
+        tile.setPadding(dp(8), dp(12), dp(8), dp(12));
+        tile.setBackground(round(surface(), 15, border()));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(78), 1);
+        lp.setMargins(dp(3), 0, dp(3), 0);
+        tile.setLayoutParams(lp);
+
+        TextView number = new TextView(this);
+        number.setText(value);
+        number.setTextSize(22);
+        number.setTextColor(primary());
+        number.setGravity(Gravity.CENTER);
+
+        TextView caption = new TextView(this);
+        caption.setText(label);
+        caption.setTextSize(10.5f);
+        caption.setTextColor(secondary());
+        caption.setGravity(Gravity.CENTER);
+
+        tile.addView(number);
+        tile.addView(caption);
+        return tile;
+    }
+
+    private TextView actionButton(String text, boolean accentButton) {
+        TextView button = new TextView(this);
+        button.setText(text);
+        button.setTextSize(15);
+        button.setGravity(Gravity.CENTER);
+        button.setClickable(true);
+        button.setFocusable(true);
+
+        if (accentButton) {
+            button.setTextColor(Color.WHITE);
+            button.setBackground(round(accent(), 15, Color.TRANSPARENT));
+        } else {
+            button.setTextColor(primary());
+            button.setBackground(round(surface2(), 15, border()));
+        }
+        return button;
     }
 
     private void addPlanoCard() {
-        LinearLayout card = cardBase();
-
-        LinearLayout top = new LinearLayout(this);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-
-        TextView name = cardTitle("Plano");
-        name.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
-
-        TextView badge = badge("AUTO", accent());
-        top.addView(name);
-        top.addView(badge);
-
-        TextView sub = cardSub("Connexion automatique sécurisée • 2 étapes");
-
-        LinearLayout row = buttonRow();
-        Button open = smallButton("Ouvrir");
-        open.setOnClickListener(v -> openPlano());
-
-        Button settings = smallButton("Identifiants");
-        settings.setOnClickListener(v -> editPlanoCredentials(false));
-
-        row.addView(open);
-        row.addView(settings);
-
-        card.addView(top);
-        card.addView(sub);
-        card.addView(row);
+        LinearLayout card = dashboardAppCard(
+                "Plano",
+                "Prêt • Connexion automatique",
+                "AUTO",
+                accent());
+        card.setOnClickListener(v -> openPlano());
         homeList.addView(card);
     }
 
-    private void addCustomCard(SiteProfile s) {
-        LinearLayout card = cardBase();
+    private void addCustomCard(SiteProfile site) {
+        String type = site.authType == null ? "PENDING" : site.authType;
+        Uri uri = Uri.parse(site.url);
+        String host = uri.getHost() == null ? site.url : uri.getHost();
 
-        LinearLayout top = new LinearLayout(this);
-        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout card = dashboardAppCard(
+                site.name,
+                host + " • " + authLabel(type),
+                authShort(type),
+                authColor(type));
 
-        TextView name = cardTitle(s.name);
-        name.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
-
-        String type = s.authType == null ? "PENDING" : s.authType;
-        TextView badge = badge(authShort(type), authColor(type));
-
-        top.addView(name);
-        top.addView(badge);
-
-        Uri u = Uri.parse(s.url);
-        String host = u.getHost() == null ? s.url : u.getHost();
-
-        TextView sub = cardSub(host + " • " + authLabel(type));
-
-        LinearLayout row = buttonRow();
-
-        Button open = smallButton("Ouvrir");
-        open.setOnClickListener(v -> {
-            if ("PENDING".equals(type) || "UNKNOWN".equals(type)) analyzeSite(s);
-            else openCustom(s);
+        card.setOnClickListener(v -> {
+            if ("PENDING".equals(type) || "UNKNOWN".equals(type)) analyzeSite(site);
+            else openCustom(site);
         });
 
-        Button edit = smallButton("Gérer");
-        edit.setOnClickListener(v -> showSiteActions(s));
+        card.setOnLongClickListener(v -> {
+            showSiteActions(site);
+            return true;
+        });
 
-        row.addView(open);
-        row.addView(edit);
-
-        card.addView(top);
-        card.addView(sub);
-        card.addView(row);
         homeList.addView(card);
+    }
+
+    private LinearLayout dashboardAppCard(String name, String subtitle, String badgeText, int badgeColor) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(14), dp(12), dp(12), dp(12));
+        card.setBackground(round(surface(), 17, border()));
+        card.setClickable(true);
+        card.setFocusable(true);
+
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(-1, -2);
+        cardLp.setMargins(0, 0, 0, dp(10));
+        card.setLayoutParams(cardLp);
+
+        TextView appIcon = new TextView(this);
+        appIcon.setText(name.isEmpty() ? "A" : name.substring(0, 1).toUpperCase(Locale.ROOT));
+        appIcon.setTextSize(20);
+        appIcon.setTextColor(Color.WHITE);
+        appIcon.setGravity(Gravity.CENTER);
+        appIcon.setBackground(round(accent(), 14, Color.TRANSPARENT));
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        iconLp.setMargins(0, 0, dp(12), 0);
+        appIcon.setLayoutParams(iconLp);
+
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        text.setLayoutParams(new LinearLayout.LayoutParams(0, -2, 1));
+
+        TextView title = new TextView(this);
+        title.setText(name);
+        title.setTextSize(17);
+        title.setTextColor(primary());
+
+        TextView sub = new TextView(this);
+        sub.setText(subtitle);
+        sub.setTextSize(12.5f);
+        sub.setTextColor(secondary());
+
+        text.addView(title);
+        text.addView(sub);
+
+        TextView badge = badge(badgeText, badgeColor);
+
+        TextView arrow = new TextView(this);
+        arrow.setText("›");
+        arrow.setTextSize(26);
+        arrow.setTextColor(secondary());
+        arrow.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams arrowLp = new LinearLayout.LayoutParams(dp(30), dp(48));
+        arrowLp.setMargins(dp(6), 0, 0, 0);
+        arrow.setLayoutParams(arrowLp);
+
+        card.addView(appIcon);
+        card.addView(text);
+        card.addView(badge);
+        card.addView(arrow);
+        return card;
     }
 
     private TextView badge(String text, int color) {
@@ -1239,6 +1344,11 @@ public class MainActivity extends Activity {
                 "Sauvegarde / restauration",
                 "Exporter ou réimporter une sauvegarde chiffrée",
                 v -> showBackupMenu()));
+
+        stack.addView(settingsRow(
+                "Proposer une idée",
+                "Envoyer une suggestion pour améliorer Wonder Apps",
+                v -> showFeedbackDialog()));
 
         stack.addView(settingsRow(
                 "À propos",
@@ -2061,6 +2171,62 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showFeedbackDialog() {
+        EditText idea = new EditText(this);
+        idea.setHint("Décris ton idée ou l’amélioration souhaitée…");
+        idea.setMinLines(5);
+        idea.setGravity(Gravity.TOP | Gravity.START);
+        idea.setTextColor(primary());
+        idea.setHintTextColor(secondary());
+        idea.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Proposer une idée")
+                .setMessage("Ton message sera préparé pour être envoyé à l’auteur de Wonder Apps.")
+                .setView(form(idea))
+                .setPositiveButton("Préparer l’e-mail", null)
+                .setNegativeButton("Annuler", null)
+                .create();
+
+        dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            String text = idea.getText().toString().trim();
+
+            if (text.length() < 3) {
+                idea.setError("Décris ton idée en quelques mots");
+                return;
+            }
+
+            dialog.dismiss();
+            composeFeedbackEmail(text);
+        }));
+
+        dialog.show();
+    }
+
+    private void composeFeedbackEmail(String idea) {
+        String recipient = "younes.ajbilou@wonderbox.com";
+        String subject = "Suggestion Wonder Apps";
+        String body = "Bonjour,\n\n"
+                + "Voici une idée pour améliorer Wonder Apps :\n\n"
+                + idea
+                + "\n\n---\nEnvoyé depuis Wonder Apps v1.8";
+
+        Intent intent = new Intent(Intent.ACTION_SENDTO);
+        intent.setData(Uri.parse("mailto:" + recipient));
+        intent.putExtra(Intent.EXTRA_SUBJECT, subject);
+        intent.putExtra(Intent.EXTRA_TEXT, body);
+
+        try {
+            startActivity(intent);
+        } catch (Exception e) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Aucune application e-mail disponible")
+                    .setMessage("Impossible d’ouvrir un client e-mail sur ce téléphone.\n\nDestinataire : " + recipient)
+                    .setPositiveButton("OK", null)
+                    .show();
+        }
+    }
+
     private void showSecurity() {
         new AlertDialog.Builder(this)
                 .setTitle("Sécurité")
@@ -2082,7 +2248,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 1.7\n\n"
+                .setMessage("Wonder Apps\nVersion 1.8\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
