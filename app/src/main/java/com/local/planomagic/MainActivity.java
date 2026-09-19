@@ -1681,6 +1681,10 @@ public class MainActivity extends Activity {
         }
 
         Runnable open = () -> {
+            if ((site.vpnRequired || isInternalHttp(site)) && !hasActiveVpn()) {
+                showVpnConnectionHelp(site);
+                return;
+            }
             if (isInternalHttp(site) || !site.autoConnect) {
                 // Manual connections must not trigger automatic analysis or
                 // have their HTTP Basic challenges silently cancelled.
@@ -3366,10 +3370,23 @@ public class MainActivity extends Activity {
             vpn.setEnabled(false);
         }
 
+        CheckBox resumeVpn = securityCheck(
+                "Reprendre l’ouverture après FortiClient",
+                "Après la saisie des identifiants VPN et du code FortiToken, "
+                        + "ouvre le site au retour dans Wonder Apps lorsqu’un VPN est détecté.",
+                saved.resumeAfterVpn);
+        resumeVpn.setVisibility(vpn.isChecked() ? View.VISIBLE : View.GONE);
+        vpn.setOnCheckedChangeListener((button, checked) ->
+                resumeVpn.setVisibility(checked ? View.VISIBLE : View.GONE));
+
         stack.addView(bio);
         stack.addView(lock);
         stack.addView(screen);
         stack.addView(vpn);
+        stack.addView(resumeVpn);
+        stack.addView(smallNote("Wonder Apps n’enregistre pas les identifiants VPN "
+                + "ni le code FortiToken. Un VPN détecté ne prouve pas "
+                + "à lui seul que le site interne est accessible."));
         stack.addView(smallNote("La protection biométrique par site permet aussi "
                 + "le code PIN Wonder Apps en secours. Elle ne remplace pas "
                 + "l’authentification du site lui-même."));
@@ -3382,12 +3399,17 @@ public class MainActivity extends Activity {
                     saved.lockOnExit = !isBrowserPreferred(saved) && lock.isChecked();
                     saved.blockScreenshots = screen.isChecked();
                     saved.vpnRequired = isInternalHttp(saved) || vpn.isChecked();
+                    saved.resumeAfterVpn = resumeVpn.isChecked();
+                    if (!saved.vpnRequired && saved.id.equals(waitingVpnSiteId)) {
+                        waitingVpnSiteId = null;
+                    }
                     saveSites(sites);
                     if (activeSite != null && saved.id.equals(activeSite.id)) {
                         activeSite.requireBiometric = saved.requireBiometric;
                         activeSite.lockOnExit = saved.lockOnExit;
                         activeSite.blockScreenshots = saved.blockScreenshots;
                         activeSite.vpnRequired = saved.vpnRequired;
+                        activeSite.resumeAfterVpn = saved.resumeAfterVpn;
                         applyScreenProtection(saved.blockScreenshots);
                     }
                     if (onHome) rebuildHome();
