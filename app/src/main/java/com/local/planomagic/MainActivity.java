@@ -451,7 +451,7 @@ public class MainActivity extends Activity {
         labels.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
         headerTitle = new TextView(this);
-        headerTitle.setText("Mes accès Wonderbox");
+        headerTitle.setText("Wonder Apps");
         headerTitle.setTextSize(18);
         headerTitle.setTextColor(primary());
 
@@ -665,6 +665,7 @@ public class MainActivity extends Activity {
 
     private void addPlanoCard() {
         LinearLayout card = dashboardAppCard(
+                SITE_PLANO_ID,
                 "Plano",
                 "Prêt • Connexion automatique",
                 "AUTO",
@@ -679,8 +680,9 @@ public class MainActivity extends Activity {
         String host = uri.getHost() == null ? site.url : uri.getHost();
 
         LinearLayout card = dashboardAppCard(
+                site.id,
                 site.name,
-                host + " • " + authLabel(type),
+                host + " • " + siteStateLabel(site),
                 authShort(type),
                 authColor(type));
 
@@ -697,7 +699,7 @@ public class MainActivity extends Activity {
         homeList.addView(card);
     }
 
-    private LinearLayout dashboardAppCard(String name, String subtitle, String badgeText, int badgeColor) {
+    private LinearLayout dashboardAppCard(String siteId, String name, String subtitle, String badgeText, int badgeColor) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
@@ -710,15 +712,7 @@ public class MainActivity extends Activity {
         cardLp.setMargins(0, 0, 0, dp(10));
         card.setLayoutParams(cardLp);
 
-        TextView appIcon = new TextView(this);
-        appIcon.setText(name.isEmpty() ? "A" : name.substring(0, 1).toUpperCase(Locale.ROOT));
-        appIcon.setTextSize(20);
-        appIcon.setTextColor(Color.WHITE);
-        appIcon.setGravity(Gravity.CENTER);
-        appIcon.setBackground(round(accent(), 14, Color.TRANSPARENT));
-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(48), dp(48));
-        iconLp.setMargins(0, 0, dp(12), 0);
-        appIcon.setLayoutParams(iconLp);
+        View appIcon = siteIconView(siteId, name);
 
         LinearLayout text = new LinearLayout(this);
         text.setOrientation(LinearLayout.VERTICAL);
@@ -764,6 +758,18 @@ public class MainActivity extends Activity {
         v.setPadding(dp(8), dp(4), dp(8), dp(4));
         v.setBackground(round(surface2(), 20, color));
         return v;
+    }
+
+    private String siteStateLabel(SiteProfile site) {
+        if (site == null) return "Configuration à vérifier";
+        String type = site.authType == null ? "PENDING" : site.authType;
+        if ("PENDING".equals(type) || "UNKNOWN".equals(type)) return "Configuration à vérifier";
+        if (("FORM".equals(type) || "BASIC".equals(type))
+                && (site.username.isEmpty() || site.password.isEmpty())) {
+            return "Connexion nécessaire";
+        }
+        if ("SSO".equals(type) || "MFA".equals(type)) return "Connexion interactive";
+        return "Prêt";
     }
 
     private String authShort(String type) {
@@ -1288,7 +1294,7 @@ public class MainActivity extends Activity {
 
         homeScroll.setVisibility(View.VISIBLE);
         web.setVisibility(View.GONE);
-        headerTitle.setText("Mes accès Wonderbox");
+        headerTitle.setText("Wonder Apps");
         status(msg);
         homeButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
@@ -1357,47 +1363,78 @@ public class MainActivity extends Activity {
     }
 
     private void loadAppLogo() {
-        if (avatar == null) return;
-
-        File file = customLogoFile();
-        if (file.exists()) {
-            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
-            if (bitmap != null) {
-                avatar.setImageBitmap(bitmap);
-                return;
-            }
-        }
-        avatar.setImageResource(R.drawable.app_icon_photo);
+        if (avatar != null) avatar.setImageResource(R.drawable.app_icon_photo);
     }
 
-    private void chooseAppLogo() {
+    private File siteLogoFile(String siteId) {
+        String safe = (siteId == null ? "site" : siteId).replaceAll("[^a-zA-Z0-9._-]", "_");
+        return new File(getFilesDir(), "site_logo_" + safe + ".png");
+    }
+
+    private Bitmap loadSiteLogoBitmap(String siteId) {
+        File file = siteLogoFile(siteId);
+        if (!file.exists()) return null;
+        return BitmapFactory.decodeFile(file.getAbsolutePath());
+    }
+
+    private View siteIconView(String siteId, String name) {
+        Bitmap bitmap = loadSiteLogoBitmap(siteId);
+        if (bitmap != null) {
+            ImageView icon = new ImageView(this);
+            icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            icon.setImageBitmap(bitmap);
+            icon.setBackground(round(surface2(), 14, border()));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
+            lp.setMargins(0, 0, dp(12), 0);
+            icon.setLayoutParams(lp);
+            return icon;
+        }
+
+        TextView icon = new TextView(this);
+        icon.setText(name == null || name.isEmpty() ? "A" : name.substring(0, 1).toUpperCase(Locale.ROOT));
+        icon.setTextSize(20);
+        icon.setTextColor(Color.WHITE);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(round(accent(), 14, Color.TRANSPARENT));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(48));
+        lp.setMargins(0, 0, dp(12), 0);
+        icon.setLayoutParams(lp);
+        return icon;
+    }
+
+    private void chooseSiteLogo(String siteId) {
+        pendingSiteLogoId = siteId;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
-        startActivityForResult(intent, REQ_PICK_LOGO);
+        startActivityForResult(intent, REQ_PICK_SITE_LOGO);
     }
 
-    private void savePickedLogo(Uri uri) {
+    private void savePickedSiteLogo(Uri uri, String siteId) {
+        if (siteId == null || siteId.isEmpty()) return;
+
         try (InputStream in = getContentResolver().openInputStream(uri)) {
             if (in == null) throw new IOException("Image inaccessible");
 
             Bitmap bitmap = BitmapFactory.decodeStream(in);
             if (bitmap == null) throw new IOException("Image invalide");
 
-            int max = 1024;
+            int max = 768;
             if (bitmap.getWidth() > max || bitmap.getHeight() > max) {
                 float ratio = Math.min((float) max / bitmap.getWidth(), (float) max / bitmap.getHeight());
-                int w = Math.max(1, Math.round(bitmap.getWidth() * ratio));
-                int h = Math.max(1, Math.round(bitmap.getHeight() * ratio));
-                bitmap = Bitmap.createScaledBitmap(bitmap, w, h, true);
+                bitmap = Bitmap.createScaledBitmap(
+                        bitmap,
+                        Math.max(1, Math.round(bitmap.getWidth() * ratio)),
+                        Math.max(1, Math.round(bitmap.getHeight() * ratio)),
+                        true);
             }
 
-            try (OutputStream out = new FileOutputStream(customLogoFile())) {
+            try (OutputStream out = new FileOutputStream(siteLogoFile(siteId))) {
                 bitmap.compress(Bitmap.CompressFormat.PNG, 92, out);
             }
 
-            loadAppLogo();
-            Toast.makeText(this, "Logo mis à jour", Toast.LENGTH_SHORT).show();
+            if (onHome) rebuildHome();
+            Toast.makeText(this, "Logo de l’application mis à jour", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             new AlertDialog.Builder(this)
                     .setTitle("Logo non modifié")
@@ -1407,11 +1444,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void resetAppLogo() {
-        File file = customLogoFile();
+    private void resetSiteLogo(String siteId) {
+        File file = siteLogoFile(siteId);
         if (file.exists()) file.delete();
-        loadAppLogo();
-        Toast.makeText(this, "Logo par défaut restauré", Toast.LENGTH_SHORT).show();
+        if (onHome) rebuildHome();
+        Toast.makeText(this, "Logo automatique restauré", Toast.LENGTH_SHORT).show();
     }
 
     private void pinCustomHomeShortcut() {
