@@ -2480,6 +2480,11 @@ public class MainActivity extends Activity {
         LinearLayout stack = dialogStack();
 
         stack.addView(settingsRow(
+                "À propos de Wonder Apps",
+                "Pourquoi cette application, sa citation et son créateur",
+                v -> showAbout()));
+
+        stack.addView(settingsRow(
                 "Sécurité et déverrouillage",
                 "Biométrie, code PIN et informations de sécurité",
                 v -> showUnlockSettings()));
@@ -2519,14 +2524,13 @@ public class MainActivity extends Activity {
                 "Événements techniques utiles, sans mot de passe ni contenu des pages",
                 v -> showLocalLog()));
 
-        stack.addView(settingsRow(
-                "À propos",
-                "Version, auteur et objectif de l’application",
-                v -> showAbout()));
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(stack);
 
         new AlertDialog.Builder(this)
                 .setTitle("Réglages")
-                .setView(stack)
+                .setView(scroll)
                 .setNegativeButton("Fermer", null)
                 .show();
     }
