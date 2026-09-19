@@ -1171,15 +1171,21 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                if (mode == Mode.CUSTOM && activeSite != null && "BASIC".equals(activeSite.authType)
+                if (mode == Mode.CUSTOM && activeSite != null
+                        && activeSite.autoConnect
+                        && ("BASIC".equals(activeSite.authType)
+                                || "BASIC_FORM".equals(activeSite.authType))
                         && sameConfiguredHost(activeSite, host)
-                        && !genericBasicTried
-                        && !activeSite.username.isEmpty()
-                        && !activeSite.password.isEmpty()) {
-                    genericBasicTried = true;
-                    status("Authentification…");
-                    h.proceed(activeSite.username, activeSite.password);
-                    return;
+                        && !genericBasicTried) {
+                    boolean twoSteps = "BASIC_FORM".equals(activeSite.authType);
+                    String basicUser = twoSteps ? activeSite.basicUsername : activeSite.username;
+                    String basicPass = twoSteps ? activeSite.basicPassword : activeSite.password;
+                    if (!basicUser.isEmpty() && !basicPass.isEmpty()) {
+                        genericBasicTried = true;
+                        status(twoSteps ? "Connexion 1/2 • Accès au site…" : "Authentification…");
+                        h.proceed(basicUser, basicPass);
+                        return;
+                    }
                 }
 
                 h.cancel();
@@ -1208,11 +1214,15 @@ public class MainActivity extends Activity {
                     tryPlanoAdLogin();
                 } else if (mode == Mode.CUSTOM && activeSite != null) {
                     String type = activeSite.authType == null ? "PENDING" : activeSite.authType;
-                    if ("FORM".equals(type) && sameConfiguredHost(activeSite, uri.getHost())) {
+                    if (activeSite.autoConnect
+                            && ("FORM".equals(type) || "BASIC_FORM".equals(type))
+                            && sameConfiguredHost(activeSite, uri.getHost())) {
                         if (genericFormTried) checkGenericSessionState(activeSite);
                         else tryGenericLogin();
+                    } else if (!activeSite.autoConnect) {
+                        status("Connexion manuelle");
                     } else if ("BASIC".equals(type) || "NONE".equals(type)) {
-                        status("Page ouverte");
+                        status("Page ouverte • connexion à confirmer");
                     } else if ("SSO".equals(type) || "MFA".equals(type)) {
                         status("Connexion professionnelle");
                     }
@@ -1433,7 +1443,9 @@ public class MainActivity extends Activity {
 
     private void tryGenericLogin() {
         if (activeSite == null || genericFormTried) return;
-        if (!"FORM".equals(activeSite.authType)) return;
+        if (!activeSite.autoConnect
+                || (!"FORM".equals(activeSite.authType)
+                        && !"BASIC_FORM".equals(activeSite.authType))) return;
         if (isAtlassianCloudSite(activeSite)) {
             status("Connexion professionnelle • authentification manuelle");
             return;
@@ -1448,7 +1460,9 @@ public class MainActivity extends Activity {
         web.evaluateJavascript(loginScript(user, pass), r -> {
             if (r != null && r.contains("OK")) {
                 genericFormTried = true;
-                status("Connexion automatique…");
+                status("BASIC_FORM".equals(activeSite.authType)
+                        ? "Connexion 2/2 • Compte professionnel…"
+                        : "Connexion automatique…");
                 timer.postDelayed(() -> checkGenericSessionState(activeSite), 4500);
             } else {
                 status("Formulaire prêt • connexion à confirmer");
