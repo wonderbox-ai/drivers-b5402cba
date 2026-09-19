@@ -19,6 +19,8 @@ import org.json.JSONObject;
 import java.util.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import android.util.Base64;
 
 public class MainActivity extends Activity {
@@ -2171,6 +2173,9 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final String FEEDBACK_ENDPOINT = "https://submit-form.com/VdUPDDIZz";
+    private static final String KEY_LAST_FEEDBACK = "last_feedback_at";
+
     private void showFeedbackDialog() {
         EditText idea = new EditText(this);
         idea.setHint("Décris ton idée ou l’amélioration souhaitée…");
@@ -2178,53 +2183,105 @@ public class MainActivity extends Activity {
         idea.setGravity(Gravity.TOP | Gravity.START);
         idea.setTextColor(primary());
         idea.setHintTextColor(secondary());
-        idea.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        idea.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Proposer une idée")
-                .setMessage("Ton message sera préparé pour être envoyé à l’auteur de Wonder Apps.")
+                .setMessage("Ta suggestion sera envoyée directement, sans ouvrir Outlook.")
                 .setView(form(idea))
-                .setPositiveButton("Préparer l’e-mail", null)
+                .setPositiveButton("Envoyer", null)
                 .setNegativeButton("Annuler", null)
                 .create();
 
         dialog.setOnShowListener(x -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String text = idea.getText().toString().trim();
+            String message = idea.getText().toString().trim();
 
-            if (text.length() < 3) {
+            if (message.length() < 3) {
                 idea.setError("Décris ton idée en quelques mots");
                 return;
             }
 
-            dialog.dismiss();
-            composeFeedbackEmail(text);
+            long now = System.currentTimeMillis();
+            long previous = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                    .getLong(KEY_LAST_FEEDBACK, 0L);
+
+            if (now - previous < 15000L) {
+                Toast.makeText(this, "Une suggestion vient déjà d’être envoyée. Réessaie dans quelques secondes.", Toast.LENGTH_LONG).show();
+                return;
+            }
+
+            Button send = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+            send.setEnabled(false);
+            send.setText("Envoi…");
+
+            submitFeedback(message, success -> runOnUiThread(() -> {
+                if (success) {
+                    getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                            .edit()
+                            .putLong(KEY_LAST_FEEDBACK, System.currentTimeMillis())
+                            .apply();
+
+                    dialog.dismiss();
+                    new AlertDialog.Builder(this)
+                            .setTitle("Merci 💡")
+                            .setMessage("Ta suggestion a bien été envoyée.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                } else {
+                    send.setEnabled(true);
+                    send.setText("Réessayer");
+                    new AlertDialog.Builder(this)
+                            .setTitle("Envoi impossible")
+                            .setMessage("Vérifie ta connexion Internet puis réessaie.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
+            }));
         }));
 
         dialog.show();
     }
 
-    private void composeFeedbackEmail(String idea) {
-        String recipient = "younes.ajbilou@wonderbox.com";
-        String subject = "Suggestion Wonder Apps";
-        String body = "Bonjour,\n\n"
-                + "Voici une idée pour améliorer Wonder Apps :\n\n"
-                + idea
-                + "\n\n---\nEnvoyé depuis Wonder Apps v1.8";
+    private interface FeedbackCallback {
+        void done(boolean success);
+    }
 
-        Intent intent = new Intent(Intent.ACTION_SENDTO);
-        intent.setData(Uri.parse("mailto:" + recipient));
-        intent.putExtra(Intent.EXTRA_SUBJECT, subject);
-        intent.putExtra(Intent.EXTRA_TEXT, body);
+    private void submitFeedback(String message, FeedbackCallback callback) {
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                URL url = new URL(FEEDBACK_ENDPOINT);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(10000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("Accept", "application/json");
 
-        try {
-            startActivity(intent);
-        } catch (Exception e) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Aucune application e-mail disponible")
-                    .setMessage("Impossible d’ouvrir un client e-mail sur ce téléphone.\n\nDestinataire : " + recipient)
-                    .setPositiveButton("OK", null)
-                    .show();
-        }
+                JSONObject payload = new JSONObject();
+                payload.put("message", message);
+                payload.put("source", "Wonder Apps Android");
+                payload.put("version", "1.9");
+
+                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+                connection.setFixedLengthStreamingMode(body.length);
+
+                try (OutputStream out = connection.getOutputStream()) {
+                    out.write(body);
+                    out.flush();
+                }
+
+                int code = connection.getResponseCode();
+                callback.done(code >= 200 && code < 300);
+            } catch (Exception ex) {
+                callback.done(false);
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }, "WonderAppsFeedback").start();
     }
 
     private void showSecurity() {
@@ -2248,7 +2305,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 1.8\n\n"
+                .setMessage("Wonder Apps\nVersion 1.9\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
