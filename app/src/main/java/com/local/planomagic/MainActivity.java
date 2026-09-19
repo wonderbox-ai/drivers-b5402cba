@@ -1687,7 +1687,7 @@ public class MainActivity extends Activity {
         }
 
         Runnable open = () -> {
-            if ((site.vpnRequired || isInternalHttp(site)) && !hasActiveVpn()) {
+            if (requiresVpn(site) && !hasActiveVpn()) {
                 showVpnConnectionHelp(site);
                 return;
             }
@@ -1850,7 +1850,7 @@ public class MainActivity extends Activity {
         waitingVpnSiteId = null; // Never reopen after another return from browser.
         waitingVpnStartedAt = 0L;
         SiteProfile site = findById(loadSites(), siteId);
-        if (site == null || !(site.vpnRequired || isInternalHttp(site))) return;
+        if (site == null || !requiresVpn(site)) return;
 
         if (isInternalHttp(site)) {
             // Do not probe an HTTP endpoint or inject credentials in the app.
@@ -1900,7 +1900,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if ((site.vpnRequired || isInternalHttp(site)) && !hasActiveVpn()) {
+        if (requiresVpn(site) && !hasActiveVpn()) {
             showVpnConnectionHelp(site);
             return;
         }
@@ -2930,6 +2930,13 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean requiresVpn(SiteProfile site) {
+        if (site == null || site.url == null) return false;
+        Uri uri = Uri.parse(site.url);
+        return SiteRoutingPolicy.requiresVpn(
+                uri.getScheme(), uri.getHost(), site.vpnRequired);
+    }
+
     private boolean isInternalHttp(SiteProfile site) {
         if (site == null || site.url == null) return false;
         Uri uri = Uri.parse(site.url);
@@ -3379,7 +3386,7 @@ public class MainActivity extends Activity {
                 "Option par site, désactivée par défaut.", saved.blockScreenshots);
         CheckBox vpn = securityCheck("VPN / réseau interne requis",
                 "Aide à ouvrir les outils accessibles uniquement via le réseau interne.",
-                saved.vpnRequired || isInternalHttp(saved));
+                requiresVpn(saved));
         if (isInternalHttp(saved)) {
             vpn.setChecked(true);
             vpn.setEnabled(false);
