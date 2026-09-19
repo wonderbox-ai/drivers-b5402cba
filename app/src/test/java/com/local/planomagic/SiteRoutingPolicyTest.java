@@ -41,6 +41,21 @@ public class SiteRoutingPolicyTest {
                 "jira.example.org", "MFA"));
     }
 
+    @Test public void vpnHttpIsRestrictedToExactCorporateSuffix() {
+        assertTrue(SiteRoutingPolicy.isAllowedInternalHttp(
+                "http", "wonderview.wonderbox.vpn"));
+        assertTrue(SiteRoutingPolicy.isAllowedInternalHttp(
+                "HTTP", "WONDERVIEW.WONDERBOX.VPN"));
+        assertFalse(SiteRoutingPolicy.isAllowedInternalHttp(
+                "https", "wonderview.wonderbox.vpn"));
+        assertFalse(SiteRoutingPolicy.isAllowedInternalHttp(
+                "http", "wonderbox.vpn.evil.test"));
+        assertFalse(SiteRoutingPolicy.isAllowedInternalHttp(
+                "http", "evilwonderbox.vpn"));
+        assertFalse(SiteRoutingPolicy.isAllowedInternalHttp(
+                "http", "example.com"));
+    }
+
     @Test public void autoLockIsEvaluatedBeforeShortcutOpens() {
         long backgroundAt = 1_000_000L;
         assertFalse(SiteRoutingPolicy.shouldRelock(backgroundAt, backgroundAt + 59000, 60));
