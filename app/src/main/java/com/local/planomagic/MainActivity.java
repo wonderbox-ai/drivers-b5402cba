@@ -1139,10 +1139,16 @@ public class MainActivity extends Activity {
 
                 if (mode == Mode.PLANO && PLANO_HOST.equalsIgnoreCase(uri.getHost())) {
                     tryPlanoAdLogin();
-                } else if (mode == Mode.CUSTOM && activeSite != null
-                        && sameConfiguredHost(activeSite, uri.getHost())
-                        && "FORM".equals(activeSite.authType)) {
-                    tryGenericLogin();
+                } else if (mode == Mode.CUSTOM && activeSite != null) {
+                    String type = activeSite.authType == null ? "PENDING" : activeSite.authType;
+                    if ("FORM".equals(type) && sameConfiguredHost(activeSite, uri.getHost())) {
+                        if (genericFormTried) checkGenericSessionState(activeSite);
+                        else tryGenericLogin();
+                    } else if ("BASIC".equals(type) || "NONE".equals(type)) {
+                        status("Prêt");
+                    } else if ("SSO".equals(type) || "MFA".equals(type)) {
+                        status("Connexion interactive");
+                    }
                 }
             }
         });
@@ -1356,10 +1362,27 @@ public class MainActivity extends Activity {
             if (r != null && r.contains("OK")) {
                 genericFormTried = true;
                 status("Connexion automatique…");
+                timer.postDelayed(() -> checkGenericSessionState(activeSite), 4500);
             } else {
-                status("Ouvert");
+                status("Prêt");
             }
         });
+    }
+
+    private void checkGenericSessionState(SiteProfile site) {
+        if (site == null || mode != Mode.CUSTOM || activeSite == null
+                || !site.id.equals(activeSite.id) || isFinishing()) return;
+
+        web.evaluateJavascript(
+                "(function(){var p=document.querySelector('input[type=password]');return !!(p&&p.offsetParent!==null);})()",
+                r -> {
+                    if (mode != Mode.CUSTOM || activeSite == null || !site.id.equals(activeSite.id)) return;
+                    if ("true".equals(r)) {
+                        status("Connexion nécessaire");
+                    } else {
+                        status("Prêt");
+                    }
+                });
     }
 
     private String loginScript(String userJson, String passJson) {
@@ -1458,6 +1481,7 @@ public class MainActivity extends Activity {
         showWeb("Plano");
         status("Ouverture…");
         web.loadUrl(PLANO_URL);
+        logEvent("Ouverture", "Plano");
     }
 
     private void openCustom(SiteProfile s) {
@@ -1493,6 +1517,7 @@ public class MainActivity extends Activity {
         showWeb(s.name);
         status("Ouverture…");
         web.loadUrl(s.url);
+        logEvent("Ouverture", s.name);
     }
 
     private void showHome(String msg) {
@@ -1615,6 +1640,7 @@ public class MainActivity extends Activity {
             web.loadUrl("about:blank");
         }
         clearTransientState();
+        logEvent("Session réinitialisée", siteId);
         Toast.makeText(this, "Session de cette application réinitialisée", Toast.LENGTH_SHORT).show();
     }
 
@@ -1882,6 +1908,11 @@ public class MainActivity extends Activity {
                 "Proposer une idée",
                 "Envoyer une suggestion pour améliorer Wonder Apps",
                 v -> showFeedbackDialog()));
+
+        stack.addView(settingsRow(
+                "Journal local",
+                "Événements techniques utiles, sans mot de passe ni contenu des pages",
+                v -> showLocalLog()));
 
         stack.addView(settingsRow(
                 "À propos",
@@ -3094,6 +3125,7 @@ public class MainActivity extends Activity {
                             .putLong(KEY_LAST_FEEDBACK, System.currentTimeMillis())
                             .apply();
 
+                    logEvent("Suggestion envoyée", "Formspark");
                     dialog.dismiss();
                     new AlertDialog.Builder(this)
                             .setTitle("Merci 💡")
@@ -3135,7 +3167,7 @@ public class MainActivity extends Activity {
                 JSONObject payload = new JSONObject();
                 payload.put("message", message);
                 payload.put("source", "Wonder Apps Android");
-                payload.put("version", "1.9");
+                payload.put("version", "3.0");
 
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(body.length);
@@ -3153,6 +3185,57 @@ public class MainActivity extends Activity {
                 if (connection != null) connection.disconnect();
             }
         }, "WonderAppsFeedback").start();
+    }
+
+    private File localLogFile() {
+        return new File(getFilesDir(), "wonderapps_events.log");
+    }
+
+    private void logEvent(String event, String site) {
+        try (FileWriter writer = new FileWriter(localLogFile(), true)) {
+            writer.write(System.currentTimeMillis() + " | " + event
+                    + (site == null || site.isEmpty() ? "" : " | " + site) + "\n");
+        } catch (Exception ignored) {}
+    }
+
+    private void showLocalLog() {
+        StringBuilder out = new StringBuilder();
+        try {
+            List<String> lines = new ArrayList<>();
+            try (BufferedReader reader = new BufferedReader(new FileReader(localLogFile()))) {
+                String line;
+                while ((line = reader.readLine()) != null) lines.add(line);
+            }
+            int start = Math.max(0, lines.size() - 50);
+            for (int i = start; i < lines.size(); i++) {
+                String line = lines.get(i);
+                String[] parts = line.split(" \\| ", 3);
+                try {
+                    long when = Long.parseLong(parts[0]);
+                    String date = new java.text.SimpleDateFormat("dd/MM HH:mm", Locale.FRANCE)
+                            .format(new Date(when));
+                    out.append(date).append(" • ");
+                    out.append(parts.length > 1 ? parts[1] : "Événement");
+                    if (parts.length > 2) out.append(" • ").append(parts[2]);
+                    out.append("\n");
+                } catch (Exception e) {
+                    out.append(line).append("\n");
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (out.length() == 0) out.append("Aucun événement enregistré.");
+
+        new AlertDialog.Builder(this)
+                .setTitle("Journal local")
+                .setMessage(out.toString())
+                .setPositiveButton("Fermer", null)
+                .setNeutralButton("Effacer", (d,w) -> {
+                    File file = localLogFile();
+                    if (file.exists()) file.delete();
+                    Toast.makeText(this, "Journal effacé", Toast.LENGTH_SHORT).show();
+                })
+                .show();
     }
 
     private void showSecurity() {
