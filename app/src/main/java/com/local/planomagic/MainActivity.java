@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_LOGO = 5103;
     private static final int REQ_PICK_SITE_LOGO = 5104;
     private static final String SITE_PLANO_ID = "__plano__";
+    private static final String FORTICLIENT_VPN_PACKAGE = "com.fortinet.forticlient_vpn";
     private static final String KEY_APP_ORDER = "app_order_v1";
     private static final String KEY_PLANO_FAVORITE = "plano_favorite";
     private static final String KEY_PLANO_REQUIRE_BIO = "plano_require_biometric";
@@ -79,6 +80,7 @@ public class MainActivity extends Activity {
     private String pendingSiteLogoId;
     private String pendingShortcutSiteId;
     private String pendingLauncherAction;
+    private String waitingVpnSiteId;
     private long backgroundAt = 0L;
     private CancellationSignal biometricCancellation;
     private boolean onHome = true;
@@ -111,6 +113,7 @@ public class MainActivity extends Activity {
         boolean lockOnExit = false;
         boolean blockScreenshots = false;
         boolean vpnRequired = false;
+        boolean resumeAfterVpn = true;
         String category = "";
         long lastUsed = 0L;
 
@@ -132,6 +135,7 @@ public class MainActivity extends Activity {
             o.put("lockOnExit", lockOnExit);
             o.put("blockScreenshots", blockScreenshots);
             o.put("vpnRequired", vpnRequired);
+            o.put("resumeAfterVpn", resumeAfterVpn);
             o.put("category", category);
             o.put("lastUsed", lastUsed);
             return o;
@@ -158,6 +162,7 @@ public class MainActivity extends Activity {
             s.lockOnExit = o.optBoolean("lockOnExit", false);
             s.blockScreenshots = o.optBoolean("blockScreenshots", false);
             s.vpnRequired = o.optBoolean("vpnRequired", false);
+            s.resumeAfterVpn = o.optBoolean("resumeAfterVpn", true);
             s.category = o.optString("category", "");
             s.lastUsed = o.optLong("lastUsed", 0L);
             if (o.has("autoLogin") && "PENDING".equals(s.authType) && o.optBoolean("autoLogin", false)) {
