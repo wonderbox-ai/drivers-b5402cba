@@ -1739,41 +1739,122 @@ public class MainActivity extends Activity {
         try {
             ConnectivityManager manager =
                     (ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
-            if (manager == null || manager.getActiveNetwork() == null) return false;
-            NetworkCapabilities capabilities =
-                    manager.getNetworkCapabilities(manager.getActiveNetwork());
-            return capabilities != null
-                    && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN);
-        } catch (Exception ignored) {
-            return false;
+            if (manager == null) return false;
+            // A work VPN may use split tunnelling; the default Android network
+            // can still be Wi-Fi rather than the VPN transport.
+            for (android.net.Network network : manager.getAllNetworks()) {
+                NetworkCapabilities capabilities =
+                        manager.getNetworkCapabilities(network);
+                if (capabilities != null
+                        && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
+    private void launchFortiClientForSite(SiteProfile site) {
+        if (site == null) return;
+        Intent launch = getPackageManager()
+                .getLaunchIntentForPackage(FORTICLIENT_VPN_PACKAGE);
+        if (launch == null) {
+            new AlertDialog.Builder(this)
+                    .setTitle("FortiClient VPN non disponible")
+                    .setMessage("Installe FortiClient VPN pour établir la connexion "
+                            + "Wonderbox, puis reviens ouvrir " + site.name
+                            + ". Wonder Apps ne stocke ni ton mot de passe VPN, "
+                            + "ni tes codes FortiToken.")
+                    .setPositiveButton("Ouvrir Google Play", (d,w) -> {
+                        try {
+                            startActivity(new Intent(Intent.ACTION_VIEW,
+                                    Uri.parse("https://play.google.com/store/apps/details?id="
+                                            + FORTICLIENT_VPN_PACKAGE)));
+                        } catch (Exception e) {
+                            Toast.makeText(this, "Google Play indisponible",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    })
+                    .setNegativeButton("Annuler", null)
+                    .show();
+            return;
+        }
+
+        waitingVpnSiteId = site.resumeAfterVpn ? site.id : null;
+        try {
+            startActivity(launch);
+            logEvent("Ouverture FortiClient", site.name);
+        } catch (Exception e) {
+            waitingVpnSiteId = null;
+            Toast.makeText(this, "Impossible d’ouvrir FortiClient VPN",
+                    Toast.LENGTH_LONG).show();
         }
     }
 
     private void showVpnConnectionHelp(SiteProfile site) {
+        if (site == null) return;
         new AlertDialog.Builder(this)
-                .setTitle("Connexion professionnelle nécessaire")
-                .setMessage(site.name + " est un site interne en HTTP. "
-                        + "Wonder Apps ne détecte pas de VPN actif pour sa connexion. "
-                        + "Active le VPN Wonderbox, puis retouche l’application. "
-                        + "Si tu es déjà sur le réseau interne de l’entreprise, "
-                        + "tu peux essayer sans VPN. Wonder Apps ne peut pas "
-                        + "activer ni authentifier ton VPN à ta place.")
-                .setPositiveButton("Réglages VPN", (d,w) -> {
-                    try {
-                        startActivity(new Intent(Settings.ACTION_VPN_SETTINGS));
-                    } catch (Exception unavailable) {
-                        Toast.makeText(this, "Ouvre ton application VPN professionnelle.",
-                                Toast.LENGTH_LONG).show();
+                .setTitle("VPN nécessaire pour " + site.name)
+                .setMessage("Ce site nécessite le réseau Wonderbox. "
+                        + "Wonder Apps peut ouvrir FortiClient VPN, mais tu dois "
+                        + "y saisir tes identifiants VPN, puis le code temporaire "
+                        + "à six chiffres de FortiToken Mobile. "
+                        + (site.resumeAfterVpn
+                        ? "Quand tu reviens dans Wonder Apps avec un VPN détecté, "
+                            + "le site sera ouvert automatiquement. "
+                        : "Après la connexion, reviens toucher ton application. ")
+                        + "Si tu es déjà sur le réseau interne Wonderbox, "
+                        + "tu peux essayer sans VPN.")
+                .setPositiveButton("Ouvrir FortiClient VPN",
+                        (d,w) -> launchFortiClientForSite(site))
+                .setNeutralButton("Déjà sur le réseau interne", (d,w) -> {
+                    waitingVpnSiteId = null;
+                    if (isInternalHttp(site)) {
+                        if (!launchExternalSite(site, null)) {
+                            Toast.makeText(this, "Navigateur indisponible",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    } else if (isBrowserPreferred(site)) {
+                        openBrowserForSiteWithoutVpnGate(site);
+                    } else {
+                        openCustomNow(site);
                     }
                 })
-                .setNeutralButton("Déjà sur réseau interne", (d,w) -> {
-                    if (!launchExternalSite(site, null)) {
-                        Toast.makeText(this, "Navigateur indisponible",
-                                Toast.LENGTH_LONG).show();
-                    }
-                })
-                .setNegativeButton("Annuler", null)
+                .setNegativeButton("Annuler", (d,w) -> waitingVpnSiteId = null)
                 .show();
+    }
+
+    private void resumeWaitingVpnSite() {
+        if (!unlocked || waitingVpnSiteId == null || !hasActiveVpn()
+                || isFinishing()) return;
+        String siteId = waitingVpnSiteId;
+        waitingVpnSiteId = null; // Never reopen after another return from browser.
+        SiteProfile site = findById(loadSites(), siteId);
+        if (site == null || !(site.vpnRequired || isInternalHttp(site))) return;
+
+        if (isInternalHttp(site)) {
+            // Do not probe an HTTP endpoint or inject credentials in the app.
+            openBrowserForSite(site);
+        } else {
+            openCustom(site);
+        }
+    }
+
+    private void openBrowserForSiteWithoutVpnGate(SiteProfile site) {
+        if (site == null || hasInvalidProviderEntryPoint(site)) return;
+        if (site.blockScreenshots) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Protection des captures d’écran")
+                    .setMessage("Wonder Apps ne peut pas protéger les captures "
+                            + "dans un navigateur externe.")
+                    .setPositiveButton("Compris", null)
+                    .show();
+            return;
+        }
+        if (!launchExternalSite(site, null)) {
+            Toast.makeText(this, "Navigateur indisponible",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private void openBrowserForSite(SiteProfile site) {
@@ -1799,7 +1880,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        if (isInternalHttp(site) && !hasActiveVpn()) {
+        if ((site.vpnRequired || isInternalHttp(site)) && !hasActiveVpn()) {
             showVpnConnectionHelp(site);
             return;
         }
