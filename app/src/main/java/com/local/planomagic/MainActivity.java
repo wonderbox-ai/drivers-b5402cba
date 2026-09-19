@@ -1607,13 +1607,29 @@ public class MainActivity extends Activity {
         }
     }
 
+    private boolean launchExternalSite(SiteProfile site, String browserPackage) {
+        Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(site.url));
+        view.addCategory(Intent.CATEGORY_BROWSABLE);
+        if (browserPackage != null) view.setPackage(browserPackage);
+
+        try {
+            startActivity(view);
+            recordSiteUse(site);
+            logEvent("Ouverture navigateur", site.name);
+            showHome("Site ouvert dans le navigateur");
+            return true;
+        } catch (android.content.ActivityNotFoundException | SecurityException unavailable) {
+            return false;
+        }
+    }
+
     private void openBrowserForSite(SiteProfile site) {
         if (hasInvalidProviderEntryPoint(site)) {
             explainEntryPoint(site);
             return;
         }
 
-        // FLAG_SECURE only protects our own window. Never pretend it extends to Edge/Chrome.
+        // FLAG_SECURE applies to Wonder Apps only. It cannot secure Edge / Chrome.
         if (site.blockScreenshots) {
             new AlertDialog.Builder(this)
                     .setTitle("Protection des captures activée")
@@ -1630,26 +1646,44 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(site.url));
-        view.addCategory(Intent.CATEGORY_BROWSABLE);
-
-        try {
-            startActivity(view);
-            recordSiteUse(site);
-            logEvent("Ouverture navigateur", site.name);
-            // Returning to Wonder Apps still requires its own unlock policy.
-            showHome("Ouvert dans le navigateur");
-        } catch (android.content.ActivityNotFoundException | SecurityException error) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Navigateur indisponible")
-                    .setMessage("Aucun navigateur compatible n’a pu ouvrir cette application. "
-                            + "Tu peux choisir « Ouvrir dans Wonder Apps » "
-                            + "dans ses paramètres.")
-                    .setPositiveButton("Paramètres du site",
-                            (d,w) -> showSiteOpeningMode(site))
-                    .setNegativeButton("Fermer", null)
-                    .show();
+        String packageName = null;
+        if ("EDGE".equals(site.openingMode)) {
+            packageName = "com.microsoft.emmx";
+        } else if ("CHROME".equals(site.openingMode)) {
+            packageName = "com.android.chrome";
+        } else if ("SAMSUNG".equals(site.openingMode)) {
+            packageName = "com.sec.android.app.sbrowser";
+        } else if ("AUTO".equals(site.openingMode)
+                && (isAtlassianCloudSite(site)
+                || "SSO".equals(site.authType) || "MFA".equals(site.authType))) {
+            // Microsoft Edge often has the corporate Microsoft session.
+            packageName = "com.microsoft.emmx";
         }
+
+        if (launchExternalSite(site, packageName)) return;
+
+        if ("AUTO".equals(site.openingMode) && packageName != null) {
+            if (launchExternalSite(site, null)) {
+                Toast.makeText(this, "Edge indisponible : navigateur habituel utilisé",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Navigateur indisponible")
+                .setMessage("Le navigateur sélectionné pour " + site.name
+                        + " n’est pas disponible sur ce téléphone. "
+                        + "Choisis un autre navigateur ou modifie le mode d’ouverture.")
+                .setPositiveButton("Navigateur habituel", (d,w) -> {
+                    if (!launchExternalSite(site, null)) {
+                        Toast.makeText(this, "Aucun navigateur disponible",
+                                Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton("Modifier le mode", (d,w) -> showSiteOpeningMode(site))
+                .setNegativeButton("Annuler", null)
+                .show();
     }
 
     private void handoffSsoToBrowser(SiteProfile site) {
