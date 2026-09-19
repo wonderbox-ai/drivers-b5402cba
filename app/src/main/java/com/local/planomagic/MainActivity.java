@@ -51,6 +51,10 @@ public class MainActivity extends Activity {
     private static final String KEY_PLANO_LOCK_EXIT = "plano_lock_on_exit";
     private static final String KEY_PLANO_BLOCK_SCREEN = "plano_block_screenshots";
     private static final String KEY_AUTO_LOCK_SECONDS = "auto_lock_seconds";
+    private static final String ACTION_OPEN_SITE = "com.local.planomagic.OPEN_SITE";
+    private static final String ACTION_ADD_SITE = "com.local.planomagic.ADD_SITE";
+    private static final String ACTION_FEEDBACK = "com.local.planomagic.FEEDBACK";
+    private static final String ACTION_SETTINGS = "com.local.planomagic.SETTINGS";
 
     private final Handler timer = new Handler(Looper.getMainLooper());
 
@@ -71,6 +75,7 @@ public class MainActivity extends Activity {
     private boolean importFromOnboarding = false;
     private String pendingSiteLogoId;
     private String pendingShortcutSiteId;
+    private String pendingLauncherAction;
     private long backgroundAt = 0L;
     private CancellationSignal biometricCancellation;
     private boolean onHome = true;
@@ -157,7 +162,7 @@ public class MainActivity extends Activity {
         configureWebView();
         updateSystemBars();
 
-        pendingShortcutSiteId = getIntent() == null ? null : getIntent().getStringExtra("shortcut_site_id");
+        captureLauncherIntent(getIntent());
 
         boolean onboarded = settings.getBoolean(KEY_ONBOARDED, false);
 
@@ -183,8 +188,18 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        pendingShortcutSiteId = intent == null ? null : intent.getStringExtra("shortcut_site_id");
+        captureLauncherIntent(intent);
         if (unlocked) handlePendingShortcut();
+    }
+
+    private void captureLauncherIntent(Intent intent) {
+        if (intent == null) return;
+        pendingShortcutSiteId = intent.getStringExtra("shortcut_site_id");
+        String action = intent.getAction();
+        if (ACTION_OPEN_SITE.equals(action) || ACTION_ADD_SITE.equals(action)
+                || ACTION_FEEDBACK.equals(action) || ACTION_SETTINGS.equals(action)) {
+            pendingLauncherAction = action;
+        }
     }
 
     private void requestUnlock() {
@@ -701,6 +716,8 @@ public class MainActivity extends Activity {
         idea.setLayoutParams(ideaLp);
         idea.setOnClickListener(v -> showFeedbackDialog());
         homeList.addView(idea);
+
+        updateDynamicAppShortcuts();
     }
 
     private void showSearchApps() {
@@ -1594,9 +1611,32 @@ public class MainActivity extends Activity {
     }
 
     private void handlePendingShortcut() {
+        String action = pendingLauncherAction;
         String id = pendingShortcutSiteId;
+        pendingLauncherAction = null;
         pendingShortcutSiteId = null;
-        if (id == null || id.isEmpty() || !unlocked || isFinishing()) return;
+
+        if (!unlocked || isFinishing()) return;
+
+        if (ACTION_ADD_SITE.equals(action)) {
+            showHome("Prêt");
+            timer.postDelayed(() -> editSiteAddress(null), 120);
+            return;
+        }
+
+        if (ACTION_FEEDBACK.equals(action)) {
+            showHome("Prêt");
+            timer.postDelayed(this::showFeedbackDialog, 120);
+            return;
+        }
+
+        if (ACTION_SETTINGS.equals(action)) {
+            showHome("Prêt");
+            timer.postDelayed(this::showSettingsCenter, 120);
+            return;
+        }
+
+        if (!ACTION_OPEN_SITE.equals(action) && (id == null || id.isEmpty())) return;
 
         if (SITE_PLANO_ID.equals(id)) {
             openPlano();
@@ -1666,6 +1706,98 @@ public class MainActivity extends Activity {
         return bitmap;
     }
 
+    private ShortcutInfo launcherShortcut(String id, String label, String action, String siteId,
+                                              Bitmap bitmap, int rank) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setAction(action);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (siteId != null) intent.putExtra("shortcut_site_id", siteId);
+
+        ShortcutInfo.Builder builder = new ShortcutInfo.Builder(this, id)
+                .setShortLabel(label)
+                .setLongLabel(label)
+                .setIntent(intent)
+                .setRank(rank);
+
+        if (bitmap != null) builder.setIcon(Icon.createWithBitmap(bitmap));
+        else builder.setIcon(Icon.createWithResource(this, R.drawable.ic_launcher_foreground));
+        return builder.build();
+    }
+
+    private void updateDynamicAppShortcuts() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return;
+
+        ShortcutManager manager = getSystemService(ShortcutManager.class);
+        if (manager == null) return;
+
+        int max = Math.max(1, Math.min(4, manager.getMaxShortcutCountPerActivity()));
+        List<ShortcutInfo> shortcuts = new ArrayList<>();
+        int rank = 0;
+
+        SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        List<SiteProfile> sites = loadSites();
+        SiteProfile preferred = null;
+
+        for (SiteProfile site : sites) {
+            if (site.favorite) {
+                preferred = site;
+                break;
+            }
+        }
+
+        if (preferred != null && shortcuts.size() < max) {
+            shortcuts.add(launcherShortcut(
+                    "quick_favorite",
+                    preferred.name,
+                    ACTION_OPEN_SITE,
+                    preferred.id,
+                    automaticShortcutIcon(preferred.id, preferred.name),
+                    rank++));
+        } else if (shortcuts.size() < max) {
+            shortcuts.add(launcherShortcut(
+                    "quick_plano",
+                    "Plano",
+                    ACTION_OPEN_SITE,
+                    SITE_PLANO_ID,
+                    automaticShortcutIcon(SITE_PLANO_ID, "Plano"),
+                    rank++));
+        }
+
+        if (shortcuts.size() < max) {
+            shortcuts.add(launcherShortcut(
+                    "quick_add",
+                    "Ajouter une application",
+                    ACTION_ADD_SITE,
+                    null,
+                    null,
+                    rank++));
+        }
+
+        if (shortcuts.size() < max) {
+            shortcuts.add(launcherShortcut(
+                    "quick_feedback",
+                    "Proposer une idée",
+                    ACTION_FEEDBACK,
+                    null,
+                    null,
+                    rank++));
+        }
+
+        if (shortcuts.size() < max) {
+            shortcuts.add(launcherShortcut(
+                    "quick_settings",
+                    "Réglages",
+                    ACTION_SETTINGS,
+                    null,
+                    null,
+                    rank++));
+        }
+
+        try {
+            manager.setDynamicShortcuts(shortcuts);
+        } catch (Exception ignored) {}
+    }
+
     private void pinSiteShortcut(String siteId, String name) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             Toast.makeText(this, "Les raccourcis personnalisés nécessitent Android 8 ou plus récent.", Toast.LENGTH_LONG).show();
@@ -1679,7 +1811,7 @@ public class MainActivity extends Activity {
         }
 
         Intent launch = new Intent(this, MainActivity.class);
-        launch.setAction("com.local.planomagic.OPEN_SITE");
+        launch.setAction(ACTION_OPEN_SITE);
         launch.putExtra("shortcut_site_id", siteId);
         launch.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
 
@@ -2371,6 +2503,7 @@ public class MainActivity extends Activity {
         if (saved == null) return;
         saved.favorite = !saved.favorite;
         saveSites(sites);
+        updateDynamicAppShortcuts();
         showHome(saved.favorite ? "Ajouté aux favoris" : "Retiré des favoris");
     }
 
@@ -2378,6 +2511,7 @@ public class MainActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
         boolean next = !prefs.getBoolean(KEY_PLANO_FAVORITE, false);
         prefs.edit().putBoolean(KEY_PLANO_FAVORITE, next).apply();
+        updateDynamicAppShortcuts();
         showHome(next ? "Plano ajouté aux favoris" : "Plano retiré des favoris");
     }
 
