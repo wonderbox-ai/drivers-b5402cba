@@ -2082,7 +2082,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("À propos de Wonder Apps")
-                .setMessage("Wonder Apps\nVersion 1.6\n\n"
+                .setMessage("Wonder Apps\nVersion 1.7\n\n"
                         + "Auteur :\nYounes AJBILOU\n\n"
                         + "« La performance naît souvent des petites frictions que l’on supprime chaque jour. »\n\n"
                         + "Wonder Apps a été pensé pour simplifier l’accès aux outils du quotidien, réduire les manipulations répétitives "
