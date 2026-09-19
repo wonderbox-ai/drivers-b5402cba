@@ -591,6 +591,41 @@ public class MainActivity extends Activity {
         stats.setLayoutParams(statsLp);
         homeList.addView(stats);
 
+        SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        boolean planoFavorite = prefs.getBoolean(KEY_PLANO_FAVORITE, false);
+        List<SiteProfile> favorites = new ArrayList<>();
+        for (SiteProfile site : customSites) {
+            if (site.favorite) favorites.add(site);
+        }
+
+        if (planoFavorite || !favorites.isEmpty()) {
+            TextView favTitle = new TextView(this);
+            favTitle.setText("★ Favoris");
+            favTitle.setTextSize(18);
+            favTitle.setTextColor(primary());
+            LinearLayout.LayoutParams favLp = new LinearLayout.LayoutParams(-1, -2);
+            favLp.setMargins(dp(2), 0, 0, dp(10));
+            favTitle.setLayoutParams(favLp);
+            homeList.addView(favTitle);
+
+            int shown = 0;
+            if (planoFavorite && shown < 4) {
+                addPlanoCard();
+                shown++;
+            }
+            for (SiteProfile site : favorites) {
+                if (shown >= 4) break;
+                addCustomCard(site);
+                shown++;
+            }
+
+            TextView allFav = smallNote("Appui long sur une application pour l’ajouter ou la retirer des favoris.");
+            LinearLayout.LayoutParams allFavLp = new LinearLayout.LayoutParams(-1, -2);
+            allFavLp.setMargins(0, 0, 0, dp(12));
+            allFav.setLayoutParams(allFavLp);
+            homeList.addView(allFav);
+        }
+
         TextView section = new TextView(this);
         section.setText("Mes applications");
         section.setTextSize(19);
@@ -1858,9 +1893,14 @@ public class MainActivity extends Activity {
                 v -> editSiteAddress(null)));
 
         stack.addView(settingsRow(
+                "Réorganiser les applications",
+                "Glisser-déposer les applications ajoutées pour changer leur ordre",
+                v -> showReorderApps()));
+
+        stack.addView(settingsRow(
                 "Plano",
                 "Application configurée en connexion automatique",
-                v -> editPlanoCredentials(false)));
+                v -> showPlanoActions()));
 
         for (SiteProfile site : sites) {
             final SiteProfile current = site;
@@ -2041,22 +2081,281 @@ public class MainActivity extends Activity {
     }
 
     private void showSiteActions(SiteProfile site) {
+        if (site == null) return;
+
+        String favoriteLabel = site.favorite ? "Retirer des favoris" : "Ajouter aux favoris";
         String[] actions = {
+                "Ouvrir",
                 "Modifier le nom / l’adresse",
                 "Identifiants",
+                "Changer le logo",
+                favoriteLabel,
+                "Sécurité de cette application",
+                "Réinitialiser sa session",
+                "Créer / recréer le raccourci Android",
+                "Tester l’accès",
                 "Ré-analyser la connexion",
+                "Signaler un problème",
                 "Supprimer"
         };
 
         new AlertDialog.Builder(this)
                 .setTitle(site.name)
                 .setItems(actions, (d, which) -> {
-                    if (which == 0) editSiteAddress(site);
-                    else if (which == 1) editSiteCredentials(site);
-                    else if (which == 2) confirmReanalyzeSite(site);
+                    if (which == 0) openCustom(site);
+                    else if (which == 1) editSiteAddress(site);
+                    else if (which == 2) editSiteCredentials(site);
+                    else if (which == 3) showSiteLogoMenu(site.id, site.name);
+                    else if (which == 4) toggleSiteFavorite(site);
+                    else if (which == 5) showSiteSecurity(site);
+                    else if (which == 6) resetSiteSession(site.id, site.url, "BASIC".equals(site.authType));
+                    else if (which == 7) pinSiteShortcut(site.id, site.name);
+                    else if (which == 8) testSiteAccess(site.name, site.url, site.vpnRequired);
+                    else if (which == 9) confirmReanalyzeSite(site);
+                    else if (which == 10) showFeedbackDialog("Problème sur " + site.name + " :\n");
                     else confirmDeleteSite(site);
                 })
                 .show();
+    }
+
+    private void showPlanoActions() {
+        SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        boolean favorite = prefs.getBoolean(KEY_PLANO_FAVORITE, false);
+        String[] actions = {
+                "Ouvrir",
+                "Identifiants Plano",
+                "Changer le logo",
+                favorite ? "Retirer des favoris" : "Ajouter aux favoris",
+                "Sécurité de cette application",
+                "Réinitialiser sa session",
+                "Créer / recréer le raccourci Android",
+                "Tester l’accès",
+                "Signaler un problème"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("Plano")
+                .setItems(actions, (d, which) -> {
+                    if (which == 0) openPlano();
+                    else if (which == 1) editPlanoCredentials(false);
+                    else if (which == 2) showSiteLogoMenu(SITE_PLANO_ID, "Plano");
+                    else if (which == 3) togglePlanoFavorite();
+                    else if (which == 4) showPlanoSecurity();
+                    else if (which == 5) resetSiteSession(SITE_PLANO_ID, PLANO_URL, true);
+                    else if (which == 6) pinSiteShortcut(SITE_PLANO_ID, "Plano");
+                    else if (which == 7) testSiteAccess("Plano", PLANO_URL, false);
+                    else showFeedbackDialog("Problème sur Plano :\n");
+                })
+                .show();
+    }
+
+    private void showSiteLogoMenu(String siteId, String name) {
+        String[] choices = {"Choisir dans la galerie", "Revenir au logo automatique"};
+        new AlertDialog.Builder(this)
+                .setTitle("Logo • " + name)
+                .setItems(choices, (d, which) -> {
+                    if (which == 0) chooseSiteLogo(siteId);
+                    else resetSiteLogo(siteId);
+                })
+                .show();
+    }
+
+    private void toggleSiteFavorite(SiteProfile site) {
+        List<SiteProfile> sites = loadSites();
+        SiteProfile saved = findById(sites, site.id);
+        if (saved == null) return;
+        saved.favorite = !saved.favorite;
+        saveSites(sites);
+        showHome(saved.favorite ? "Ajouté aux favoris" : "Retiré des favoris");
+    }
+
+    private void togglePlanoFavorite() {
+        SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        boolean next = !prefs.getBoolean(KEY_PLANO_FAVORITE, false);
+        prefs.edit().putBoolean(KEY_PLANO_FAVORITE, next).apply();
+        showHome(next ? "Plano ajouté aux favoris" : "Plano retiré des favoris");
+    }
+
+    private CheckBox securityCheck(String title, String subtitle, boolean checked) {
+        CheckBox box = new CheckBox(this);
+        box.setText(title + (subtitle == null || subtitle.isEmpty() ? "" : "\n" + subtitle));
+        box.setTextSize(14);
+        box.setTextColor(primary());
+        box.setChecked(checked);
+        box.setPadding(dp(8), dp(8), dp(8), dp(8));
+        return box;
+    }
+
+    private void showSiteSecurity(SiteProfile site) {
+        List<SiteProfile> sites = loadSites();
+        SiteProfile saved = findById(sites, site.id);
+        if (saved == null) return;
+
+        LinearLayout stack = dialogStack();
+        CheckBox bio = securityCheck("Toujours demander la biométrie",
+                "Exige une validation biométrique à chaque ouverture.", saved.requireBiometric);
+        CheckBox lock = securityCheck("Fermer la session à la sortie",
+                "Efface les cookies de ce site lorsque tu reviens à l’accueil.", saved.lockOnExit);
+        CheckBox screen = securityCheck("Bloquer les captures d’écran",
+                "Option par site, désactivée par défaut.", saved.blockScreenshots);
+        CheckBox vpn = securityCheck("VPN / réseau interne requis",
+                "Affiche un diagnostic plus clair si le site n’est pas joignable.", saved.vpnRequired);
+
+        stack.addView(bio);
+        stack.addView(lock);
+        stack.addView(screen);
+        stack.addView(vpn);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Sécurité • " + saved.name)
+                .setView(stack)
+                .setPositiveButton("Enregistrer", (d,w) -> {
+                    saved.requireBiometric = bio.isChecked();
+                    saved.lockOnExit = lock.isChecked();
+                    saved.blockScreenshots = screen.isChecked();
+                    saved.vpnRequired = vpn.isChecked();
+                    saveSites(sites);
+                    if (activeSite != null && saved.id.equals(activeSite.id)) {
+                        activeSite.requireBiometric = saved.requireBiometric;
+                        activeSite.lockOnExit = saved.lockOnExit;
+                        activeSite.blockScreenshots = saved.blockScreenshots;
+                        activeSite.vpnRequired = saved.vpnRequired;
+                        applyScreenProtection(saved.blockScreenshots);
+                    }
+                    if (onHome) rebuildHome();
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void showPlanoSecurity() {
+        SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        LinearLayout stack = dialogStack();
+
+        CheckBox bio = securityCheck("Toujours demander la biométrie",
+                "Exige une validation biométrique à chaque ouverture de Plano.",
+                prefs.getBoolean(KEY_PLANO_REQUIRE_BIO, false));
+        CheckBox lock = securityCheck("Fermer la session à la sortie",
+                "Efface la session Plano lorsque tu reviens à l’accueil.",
+                prefs.getBoolean(KEY_PLANO_LOCK_EXIT, false));
+        CheckBox screen = securityCheck("Bloquer les captures d’écran",
+                "Empêche captures et aperçu dans les applications récentes.",
+                prefs.getBoolean(KEY_PLANO_BLOCK_SCREEN, false));
+
+        stack.addView(bio);
+        stack.addView(lock);
+        stack.addView(screen);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Sécurité • Plano")
+                .setView(stack)
+                .setPositiveButton("Enregistrer", (d,w) -> {
+                    prefs.edit()
+                            .putBoolean(KEY_PLANO_REQUIRE_BIO, bio.isChecked())
+                            .putBoolean(KEY_PLANO_LOCK_EXIT, lock.isChecked())
+                            .putBoolean(KEY_PLANO_BLOCK_SCREEN, screen.isChecked())
+                            .apply();
+                    if (mode == Mode.PLANO) applyScreenProtection(screen.isChecked());
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void testSiteAccess(String name, String urlValue, boolean vpnRequired) {
+        Toast.makeText(this, "Test de l’accès en cours…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            int code = -1;
+            try {
+                URL url = new URL(urlValue);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("HEAD");
+                connection.setInstanceFollowRedirects(false);
+                connection.setConnectTimeout(6000);
+                connection.setReadTimeout(6000);
+                code = connection.getResponseCode();
+            } catch (Exception ignored) {
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+
+            final int result = code;
+            runOnUiThread(() -> {
+                String message;
+                if (result >= 200 && result < 500) {
+                    message = "Le site répond correctement (HTTP " + result + ").";
+                } else if (vpnRequired) {
+                    message = "Le site ne répond pas. Vérifie que le VPN ou le réseau interne est actif.";
+                } else {
+                    message = "Le site ne répond pas actuellement. Vérifie la connexion réseau ou l’adresse.";
+                }
+
+                new AlertDialog.Builder(this)
+                        .setTitle("Test d’accès • " + name)
+                        .setMessage(message)
+                        .setPositiveButton("OK", null)
+                        .show();
+            });
+        }, "WonderAppsSiteCheck").start();
+    }
+
+    private void showReorderApps() {
+        List<SiteProfile> sites = loadSites();
+        if (sites.size() < 2) {
+            Toast.makeText(this, "Ajoute au moins deux applications pour les réorganiser.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        LinearLayout stack = dialogStack();
+        stack.addView(smallNote("Maintiens une application puis dépose-la sur une autre. Plano reste épinglé en première position."));
+
+        final AlertDialog[] holder = new AlertDialog[1];
+
+        for (SiteProfile site : sites) {
+            LinearLayout row = settingsRow("☰  " + site.name, siteStateLabel(site), null);
+            row.setTag(site.id);
+            row.setOnLongClickListener(v -> {
+                ClipData data = ClipData.newPlainText("site_id", String.valueOf(v.getTag()));
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    v.startDragAndDrop(data, new View.DragShadowBuilder(v), null, 0);
+                } else {
+                    v.startDrag(data, new View.DragShadowBuilder(v), null, 0);
+                }
+                return true;
+            });
+            row.setOnDragListener((v, event) -> {
+                if (event.getAction() != DragEvent.ACTION_DROP) return true;
+                if (event.getClipData() == null || event.getClipData().getItemCount() == 0) return true;
+
+                String draggedId = String.valueOf(event.getClipData().getItemAt(0).getText());
+                String targetId = String.valueOf(v.getTag());
+                if (draggedId.equals(targetId)) return true;
+
+                List<SiteProfile> current = loadSites();
+                SiteProfile dragged = findById(current, draggedId);
+                SiteProfile target = findById(current, targetId);
+                if (dragged == null || target == null) return true;
+
+                int from = current.indexOf(dragged);
+                int to = current.indexOf(target);
+                current.remove(from);
+                if (to > current.size()) to = current.size();
+                current.add(to, dragged);
+                saveSites(current);
+
+                if (holder[0] != null) holder[0].dismiss();
+                timer.postDelayed(this::showReorderApps, 120);
+                return true;
+            });
+            stack.addView(row);
+        }
+
+        holder[0] = new AlertDialog.Builder(this)
+                .setTitle("Réorganiser")
+                .setView(stack)
+                .setNegativeButton("Terminer", (d,w) -> showHome("Ordre enregistré"))
+                .create();
+        holder[0].show();
     }
 
     private void confirmReanalyzeSite(SiteProfile site) {
@@ -2138,6 +2437,8 @@ public class MainActivity extends Activity {
                     }
 
                     saveSites(sites);
+                    File logo = siteLogoFile(site.id);
+                    if (logo.exists()) logo.delete();
                     showHome("Site supprimé");
                 })
                 .setNegativeButton("Annuler", null)
@@ -2531,6 +2832,10 @@ public class MainActivity extends Activity {
     private static final String KEY_LAST_FEEDBACK = "last_feedback_at";
 
     private void showFeedbackDialog() {
+        showFeedbackDialog("");
+    }
+
+    private void showFeedbackDialog(String initialText) {
         EditText idea = new EditText(this);
         idea.setHint("Décris ton idée ou l’amélioration souhaitée…");
         idea.setMinLines(5);
@@ -2540,6 +2845,10 @@ public class MainActivity extends Activity {
         idea.setInputType(InputType.TYPE_CLASS_TEXT
                 | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        if (initialText != null && !initialText.isEmpty()) {
+            idea.setText(initialText);
+            idea.setSelection(idea.getText().length());
+        }
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Proposer une idée")
