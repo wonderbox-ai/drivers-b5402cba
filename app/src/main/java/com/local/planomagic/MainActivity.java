@@ -49,6 +49,13 @@ public class MainActivity extends Activity {
     private static final int REQ_PICK_SITE_LOGO = 5104;
     private static final String SITE_PLANO_ID = "__plano__";
     private static final String FORTICLIENT_VPN_PACKAGE = "com.fortinet.forticlient_vpn";
+    private static final String ACTION_RETURN_VPN = "com.local.planomagic.RETURN_FROM_VPN";
+    private static final String KEY_PENDING_VPN_SITE = "pending_vpn_site";
+    private static final String KEY_PENDING_VPN_STARTED = "pending_vpn_started";
+    private static final String KEY_VPN_NOTIFICATION_ASKED = "vpn_return_notification_asked";
+    private static final String VPN_RETURN_CHANNEL = "wonderapps_vpn_return";
+    private static final int NOTIFICATION_VPN_RETURN = 3901;
+    private static final int REQUEST_VPN_NOTIFICATION_PERMISSION = 3902;
     private static final String KEY_APP_ORDER = "app_order_v1";
     private static final String KEY_PLANO_FAVORITE = "plano_favorite";
     private static final String KEY_PLANO_REQUIRE_BIO = "plano_require_biometric";
@@ -81,6 +88,7 @@ public class MainActivity extends Activity {
     private String pendingShortcutSiteId;
     private String pendingLauncherAction;
     private String waitingVpnSiteId;
+    private String pendingVpnPermissionSiteId;
     private long waitingVpnStartedAt;
     private long backgroundAt = 0L;
     private CancellationSignal biometricCancellation;
@@ -184,6 +192,12 @@ public class MainActivity extends Activity {
 
         secrets = new CredentialStore(this);
         pinManager = new PinManager(this);
+        waitingVpnSiteId = settings.getString(KEY_PENDING_VPN_SITE, null);
+        waitingVpnStartedAt = settings.getLong(KEY_PENDING_VPN_STARTED, 0L);
+        if (waitingVpnSiteId != null && (waitingVpnStartedAt <= 0L
+                || System.currentTimeMillis() - waitingVpnStartedAt > 10 * 60 * 1000L)) {
+            clearPendingVpnSite();
+        }
 
         buildUi();
         configureWebView();
@@ -222,6 +236,9 @@ public class MainActivity extends Activity {
             lockFromBackground();
         } else if (unlocked) {
             handlePendingShortcut();
+            if (ACTION_RETURN_VPN.equals(intent.getAction())) {
+                timer.post(this::resumeWaitingVpnSite);
+            }
         }
     }
 
