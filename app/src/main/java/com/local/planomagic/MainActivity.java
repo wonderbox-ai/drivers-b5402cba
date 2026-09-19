@@ -106,8 +106,6 @@ public class MainActivity extends Activity {
         // Explicit opt-in for new applications. Existing saved sites retain their
         // previous behavior via fromJson's compatibility default.
         boolean autoConnect = true;
-        String basicUsername = "";
-        String basicPassword = "";
         boolean favorite = false;
         boolean requireBiometric = false;
         boolean lockOnExit = false;
@@ -129,8 +127,6 @@ public class MainActivity extends Activity {
             o.put("loginHost", loginHost);
             o.put("openingMode", openingMode);
             o.put("autoConnect", autoConnect);
-            o.put("basicUsername", basicUsername);
-            o.put("basicPassword", basicPassword);
             o.put("favorite", favorite);
             o.put("requireBiometric", requireBiometric);
             o.put("lockOnExit", lockOnExit);
@@ -157,8 +153,6 @@ public class MainActivity extends Activity {
                     || "EDGE".equals(opening) || "CHROME".equals(opening)
                     || "SAMSUNG".equals(opening)) ? opening : "AUTO";
             s.autoConnect = o.optBoolean("autoConnect", true);
-            s.basicUsername = o.optString("basicUsername", "");
-            s.basicPassword = o.optString("basicPassword", "");
             s.favorite = o.optBoolean("favorite", false);
             s.requireBiometric = o.optBoolean("requireBiometric", false);
             s.lockOnExit = o.optBoolean("lockOnExit", false);
