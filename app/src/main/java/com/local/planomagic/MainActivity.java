@@ -1313,6 +1313,11 @@ public class MainActivity extends Activity {
             return;
         }
 
+        getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .edit()
+                .putLong("plano_last_used", System.currentTimeMillis())
+                .apply();
+
         clearTransientState();
         mode = Mode.PLANO;
         activeSite = null;
@@ -1777,6 +1782,15 @@ public class MainActivity extends Activity {
                 v -> showPinSetup(() ->
                         Toast.makeText(this, "Code PIN mis à jour", Toast.LENGTH_SHORT).show())));
 
+        int lockSeconds = getSharedPreferences(SETTINGS, MODE_PRIVATE).getInt(KEY_AUTO_LOCK_SECONDS, 60);
+        String lockLabel = lockSeconds == 0 ? "Jamais"
+                : (lockSeconds == 30 ? "30 secondes"
+                : (lockSeconds == 60 ? "1 minute" : "5 minutes"));
+        stack.addView(settingsRow(
+                "Verrouillage automatique",
+                "Actuel : " + lockLabel,
+                v -> showAutoLockSettings()));
+
         stack.addView(settingsRow(
                 "Informations de sécurité",
                 "Comprendre comment tes données sont protégées",
@@ -1786,6 +1800,31 @@ public class MainActivity extends Activity {
                 .setTitle("Sécurité et déverrouillage")
                 .setView(stack)
                 .setNegativeButton("Retour", null)
+                .show();
+    }
+
+    private void showAutoLockSettings() {
+        String[] labels = {"30 secondes", "1 minute", "5 minutes", "Jamais"};
+        int[] values = {30, 60, 300, 0};
+        int current = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .getInt(KEY_AUTO_LOCK_SECONDS, 60);
+        int selected = 1;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == current) selected = i;
+        }
+
+        final int[] choice = {selected};
+        new AlertDialog.Builder(this)
+                .setTitle("Verrouillage automatique")
+                .setSingleChoiceItems(labels, selected, (d, which) -> choice[0] = which)
+                .setPositiveButton("Enregistrer", (d,w) -> {
+                    getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                            .edit()
+                            .putInt(KEY_AUTO_LOCK_SECONDS, values[choice[0]])
+                            .apply();
+                    Toast.makeText(this, "Délai de verrouillage mis à jour", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Annuler", null)
                 .show();
     }
 
@@ -2602,7 +2641,7 @@ public class MainActivity extends Activity {
     private void showBackupMenu() {
         LinearLayout stack = dialogStack();
         stack.addView(smallNote(
-                "La sauvegarde contient tes sites, leurs réglages, le thème, le logo personnalisé et les identifiants enregistrés. "
+                "La sauvegarde contient tes sites, leurs réglages, leurs logos, l’ordre d’affichage, les favoris, le thème et les identifiants enregistrés. "
                         + "Le fichier est chiffré avec un mot de passe que toi seul connais. Le code PIN Wonder Apps n’est jamais exporté."));
 
         stack.addView(settingsRow(
@@ -2671,7 +2710,7 @@ public class MainActivity extends Activity {
     private JSONObject createBackupPayload() throws Exception {
         JSONObject payload = new JSONObject();
         payload.put("format", "wonderapps-data");
-        payload.put("version", 1);
+        payload.put("version", 2);
         payload.put("basicUser", secrets.get(CredentialStore.BASIC_USER));
         payload.put("basicPass", secrets.get(CredentialStore.BASIC_PASS));
         payload.put("adUser", secrets.get(CredentialStore.AD_USER));
@@ -2682,16 +2721,30 @@ public class MainActivity extends Activity {
         payload.put("sites", sites.isEmpty() ? "[]" : sites);
         payload.put("darkMode", darkMode);
 
-        File logo = customLogoFile();
-        if (logo.exists()) {
+        SharedPreferences prefs = getSharedPreferences(SETTINGS, MODE_PRIVATE);
+        payload.put("planoFavorite", prefs.getBoolean(KEY_PLANO_FAVORITE, false));
+        payload.put("planoRequireBiometric", prefs.getBoolean(KEY_PLANO_REQUIRE_BIO, false));
+        payload.put("planoLockOnExit", prefs.getBoolean(KEY_PLANO_LOCK_EXIT, false));
+        payload.put("planoBlockScreenshots", prefs.getBoolean(KEY_PLANO_BLOCK_SCREEN, false));
+        payload.put("autoLockSeconds", prefs.getInt(KEY_AUTO_LOCK_SECONDS, 60));
+
+        JSONObject logos = new JSONObject();
+        List<String> ids = new ArrayList<>();
+        ids.add(SITE_PLANO_ID);
+        for (SiteProfile site : loadSites()) ids.add(site.id);
+
+        for (String id : ids) {
+            File logo = siteLogoFile(id);
+            if (!logo.exists()) continue;
             try (InputStream in = new FileInputStream(logo);
                  ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 byte[] buffer = new byte[8192];
                 int read;
                 while ((read = in.read(buffer)) != -1) out.write(buffer, 0, read);
-                payload.put("customLogo", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
+                logos.put(id, Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP));
             }
         }
+        payload.put("siteLogos", logos);
 
         return payload;
     }
@@ -2780,20 +2833,39 @@ public class MainActivity extends Activity {
         secrets.put(CredentialStore.AD_PASS, payload.optString("adPass", ""));
         secrets.put(CUSTOM_SITES, payload.optString("sites", "[]"));
 
-        String logoB64 = payload.optString("customLogo", "");
-        if (!logoB64.isEmpty()) {
-            byte[] bytes = Base64.decode(logoB64, Base64.NO_WRAP);
-            try (OutputStream out = new FileOutputStream(customLogoFile())) {
-                out.write(bytes);
+        File[] files = getFilesDir().listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.getName().startsWith("site_logo_") && file.getName().endsWith(".png")) {
+                    file.delete();
+                }
             }
-            loadAppLogo();
-        } else {
-            File logo = customLogoFile();
-            if (logo.exists()) logo.delete();
-            loadAppLogo();
         }
 
+        JSONObject logos = payload.optJSONObject("siteLogos");
+        if (logos != null) {
+            Iterator<String> keys = logos.keys();
+            while (keys.hasNext()) {
+                String id = keys.next();
+                String encoded = logos.optString(id, "");
+                if (encoded.isEmpty()) continue;
+                byte[] bytes = Base64.decode(encoded, Base64.NO_WRAP);
+                try (OutputStream out = new FileOutputStream(siteLogoFile(id))) {
+                    out.write(bytes);
+                }
+            }
+        }
+
+        SharedPreferences.Editor editor = getSharedPreferences(SETTINGS, MODE_PRIVATE).edit();
+        editor.putBoolean(KEY_PLANO_FAVORITE, payload.optBoolean("planoFavorite", false));
+        editor.putBoolean(KEY_PLANO_REQUIRE_BIO, payload.optBoolean("planoRequireBiometric", false));
+        editor.putBoolean(KEY_PLANO_LOCK_EXIT, payload.optBoolean("planoLockOnExit", false));
+        editor.putBoolean(KEY_PLANO_BLOCK_SCREEN, payload.optBoolean("planoBlockScreenshots", false));
+        editor.putInt(KEY_AUTO_LOCK_SECONDS, payload.optInt("autoLockSeconds", 60));
+        editor.apply();
+
         boolean importedDark = payload.optBoolean("darkMode", false);
+        loadAppLogo();
         applyThemeWithoutRestart(importedDark);
         clearWebSession();
     }
@@ -3023,6 +3095,30 @@ public class MainActivity extends Activity {
             showHome("Prêt");
         } else {
             super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if (unlocked && !isFinishing()) backgroundAt = System.currentTimeMillis();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (!unlocked || backgroundAt <= 0L || isFinishing()) return;
+
+        int seconds = getSharedPreferences(SETTINGS, MODE_PRIVATE)
+                .getInt(KEY_AUTO_LOCK_SECONDS, 60);
+        long elapsed = System.currentTimeMillis() - backgroundAt;
+        backgroundAt = 0L;
+
+        if (seconds > 0 && elapsed >= seconds * 1000L) {
+            unlocked = false;
+            unlockFallbackStarted = false;
+            if (root != null) root.setVisibility(View.INVISIBLE);
+            requestUnlock();
         }
     }
 
