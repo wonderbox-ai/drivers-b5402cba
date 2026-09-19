@@ -4468,7 +4468,7 @@ public class MainActivity extends Activity {
                 JSONObject payload = new JSONObject();
                 payload.put("message", message);
                 payload.put("source", "Wonder Apps Android");
-                payload.put("version", "3.9");
+                payload.put("version", "3.10");
 
                 byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
                 connection.setFixedLengthStreamingMode(body.length);
