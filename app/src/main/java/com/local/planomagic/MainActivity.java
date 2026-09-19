@@ -1593,6 +1593,23 @@ public class MainActivity extends Activity {
             return;
         }
 
+        // FLAG_SECURE only protects our own window. Never pretend it extends to Edge/Chrome.
+        if (site.blockScreenshots) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Protection des captures activée")
+                    .setMessage("Le navigateur ne peut pas hériter de la protection "
+                            + "des captures d’écran de Wonder Apps. Pour ouvrir "
+                            + site.name + " dans le navigateur, choisis d’abord "
+                            + "si tu souhaites désactiver cette protection "
+                            + "pour cette application. Aucun réglage de sécurité "
+                            + "n’est modifié automatiquement.")
+                    .setPositiveButton("Sécurité du site",
+                            (d,w) -> showSiteSecurity(site))
+                    .setNegativeButton("Annuler", null)
+                    .show();
+            return;
+        }
+
         Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(site.url));
         view.addCategory(Intent.CATEGORY_BROWSABLE);
 
