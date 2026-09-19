@@ -2788,6 +2788,18 @@ public class MainActivity extends Activity {
         EditText name = input("Nom du site", false);
         EditText url = input("https://… ou http://site.wonderbox.vpn/…", false);
         EditText category = input("Catégorie (facultatif) — ex. IT, RH, Support", false);
+        CheckBox automatic = securityCheck("Connexion automatique (facultatif)",
+                "Wonder Apps peut enregistrer les identifiants de ce site sur ce téléphone.",
+                !edit || existing.autoConnect);
+        CheckBox twoSteps = securityCheck("Deux étapes de connexion, comme Plano / Nova",
+                "Accès au site (HTTP Basic), puis formulaire professionnel : "
+                        + "chaque étape possède ses identifiants.",
+                edit && "BASIC_FORM".equals(existing.authType));
+        twoSteps.setEnabled(automatic.isChecked());
+        automatic.setOnCheckedChangeListener((button, checked) -> {
+            twoSteps.setEnabled(checked);
+            if (!checked) twoSteps.setChecked(false);
+        });
 
         if (edit) {
             name.setText(existing.name);
@@ -2800,7 +2812,7 @@ public class MainActivity extends Activity {
                 .setMessage("HTTPS reste le mode sécurisé normal. Les sites HTTP "
                         + "internes Wonderbox accessibles par VPN peuvent être ajoutés "
                         + "uniquement comme raccourcis vers un navigateur externe.")
-                .setView(form(name, url, category))
+                .setView(form(name, url, category, automatic, twoSteps))
                 .setPositiveButton(edit ? "Enregistrer" : "Ajouter l’application", null)
                 .setNegativeButton("Annuler", null)
                 .create();
@@ -2848,6 +2860,8 @@ public class MainActivity extends Activity {
 
                     final String finalUrl = entered;
                     final String finalCategory = category.getText().toString().trim();
+                    final boolean wantsAuto = !internalHttp && automatic.isChecked();
+                    final boolean wantsTwoSteps = wantsAuto && twoSteps.isChecked();
 
                     Runnable persist = () -> {
                         List<SiteProfile> sites = loadSites();
@@ -2857,15 +2871,37 @@ public class MainActivity extends Activity {
                             if (site == null) site = existing;
 
                             boolean addressChanged = !finalUrl.equalsIgnoreCase(site.url);
+                            boolean modeChanged = wantsTwoSteps
+                                    != "BASIC_FORM".equals(site.authType);
                             site.name = siteName;
                             site.url = finalUrl;
                             site.category = finalCategory;
+                            site.autoConnect = wantsAuto;
 
                             if (addressChanged) {
                                 site.authType = "PENDING";
                                 site.loginHost = "";
                                 site.username = "";
                                 site.password = "";
+                                site.basicUsername = "";
+                                site.basicPassword = "";
+                            }
+                            if (wantsTwoSteps) {
+                                site.authType = "BASIC_FORM";
+                                site.loginHost = parsed.getHost();
+                                // Existing credentials are preserved only for
+                                // an unchanged URL using the same two-step mode.
+                                if (modeChanged) {
+                                    site.username = "";
+                                    site.password = "";
+                                    site.basicUsername = "";
+                                    site.basicPassword = "";
+                                }
+                            } else if (modeChanged && !addressChanged) {
+                                site.authType = "PENDING";
+                                site.loginHost = "";
+                                site.basicUsername = "";
+                                site.basicPassword = "";
                             }
                         } else {
                             site = new SiteProfile();
@@ -2873,7 +2909,9 @@ public class MainActivity extends Activity {
                             site.name = siteName;
                             site.url = finalUrl;
                             site.category = finalCategory;
-                            site.authType = "PENDING";
+                            site.authType = wantsTwoSteps ? "BASIC_FORM" : "PENDING";
+                            site.autoConnect = wantsAuto;
+                            site.loginHost = wantsTwoSteps ? parsed.getHost() : "";
                             sites.add(site);
                         }
 
@@ -2881,9 +2919,12 @@ public class MainActivity extends Activity {
                             // A VPN does not convert the origin into HTTPS.
                             // Never place passwords in our WebView or JS for HTTP.
                             site.authType = "NONE";
+                            site.autoConnect = false;
                             site.loginHost = "";
                             site.username = "";
                             site.password = "";
+                            site.basicUsername = "";
+                            site.basicPassword = "";
                             site.openingMode = "BROWSER";
                             site.vpnRequired = true;
                             site.lockOnExit = false;
@@ -2891,12 +2932,15 @@ public class MainActivity extends Activity {
 
                         saveSites(sites);
                         dialog.dismiss();
-                        if (isBrowserPreferred(site)) {
+                        if (isBrowserPreferred(site) || !site.autoConnect) {
                             showHome("Application enregistrée");
                             Toast.makeText(this, internalHttp
                                             ? "Site interne ajouté • connexion VPN nécessaire"
-                                            : site.name + " s’ouvrira dans le navigateur",
+                                            : site.name + " est prêt dans Wonder Apps",
                                     Toast.LENGTH_LONG).show();
+                        } else if (wantsTwoSteps) {
+                            showHome("Application ajoutée");
+                            editSiteCredentials(site);
                         } else {
                             analyzeSite(site);
                         }
