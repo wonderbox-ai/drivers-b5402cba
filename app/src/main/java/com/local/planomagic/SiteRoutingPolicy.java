@@ -51,6 +51,11 @@ final class SiteRoutingPolicy {
         return "http".equalsIgnoreCase(scheme) && isWonderboxVpnHost(host);
     }
 
+    static boolean requiresVpn(String scheme, String host, boolean explicitlyRequired) {
+        // Names such as Nova or Jira never imply VPN requirements.
+        return explicitlyRequired || isAllowedInternalHttp(scheme, host);
+    }
+
     static boolean useExternalBrowser(String host, String authType, String openingMode) {
         if ("IN_APP".equals(openingMode)) return false;
         if ("BROWSER".equals(openingMode) || "EDGE".equals(openingMode)
