@@ -1989,6 +1989,10 @@ public class MainActivity extends Activity {
                         ? "Quand tu reviens dans Wonder Apps avec un VPN détecté, "
                             + "le site sera ouvert automatiquement. "
                         : "Après la connexion, reviens toucher ton application. ")
+                        + "FortiClient ne peut pas ramener Wonder Apps "
+                        + "au premier plan tout seul : après FortiToken, "
+                        + "touche le rappel Wonder Apps si tu l’as autorisé, "
+                        + "ou reviens par les applications récentes. "
                         + "Si tu es déjà sur le réseau interne Wonderbox, "
                         + "tu peux essayer sans VPN.")
                 .setPositiveButton("Ouvrir FortiClient VPN",
