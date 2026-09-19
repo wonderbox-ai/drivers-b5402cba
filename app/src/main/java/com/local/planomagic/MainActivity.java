@@ -1649,6 +1649,17 @@ public class MainActivity extends Activity {
         Runnable open = () -> {
             if (isInternalHttp(site)) {
                 openBrowserForSite(site);
+            } else if ("BASIC_FORM".equals(site.authType)
+                    && (site.basicUsername.isEmpty() || site.basicPassword.isEmpty()
+                    || site.username.isEmpty() || site.password.isEmpty())) {
+                new AlertDialog.Builder(this)
+                        .setTitle("Configurer la connexion de " + site.name)
+                        .setMessage("Comme Plano, cette application utilise deux étapes : "
+                                + "accès au site, puis formulaire professionnel. "
+                                + "Enregistre les deux identifiants et les deux mots de passe.")
+                        .setPositiveButton("Configurer", (d,w) -> editTwoStepCredentials(site))
+                        .setNegativeButton("Annuler", null)
+                        .show();
             } else if ("PENDING".equals(site.authType) || "UNKNOWN".equals(site.authType)) {
                 if (isBrowserPreferred(site)) openBrowserForSite(site);
                 else analyzeSite(site);
