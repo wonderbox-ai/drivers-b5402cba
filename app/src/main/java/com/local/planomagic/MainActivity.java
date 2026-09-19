@@ -1676,8 +1676,9 @@ public class MainActivity extends Activity {
 
     private void openCustom(SiteProfile site) {
         if (site == null) return;
-        if (waitingVpnSiteId != null && !site.id.equals(waitingVpnSiteId)) {
-            waitingVpnSiteId = null; // Opening another app cancels a pending VPN handoff.
+        if (waitingVpnSiteId != null) {
+            // Any manual tap supersedes the previously queued VPN handoff.
+            waitingVpnSiteId = null;
             waitingVpnStartedAt = 0L;
         }
         if (hasInvalidProviderEntryPoint(site)) {
