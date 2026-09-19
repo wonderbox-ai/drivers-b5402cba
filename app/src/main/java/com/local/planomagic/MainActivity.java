@@ -387,6 +387,7 @@ public class MainActivity extends Activity {
         root.setVisibility(View.VISIBLE);
         showHome("Déverrouillé");
         handlePendingShortcut();
+        if (pendingLauncherAction == null) resumeWaitingVpnSite();
     }
 
     private void updateSystemBars() {
@@ -4439,6 +4440,15 @@ public class MainActivity extends Activity {
             lockFromBackground();
         } else {
             backgroundAt = 0L;
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (unlocked && waitingVpnSiteId != null) {
+            // Activity lifecycle runs after Android evaluates background auto-lock.
+            timer.post(this::resumeWaitingVpnSite);
         }
     }
 
